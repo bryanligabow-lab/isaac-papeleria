@@ -1,0 +1,43 @@
+// Pantalla de login.
+Router.register("/login", async (host) => {
+  host.parentElement.parentElement?.replaceWith?.(host.parentElement.parentElement);
+  host.innerHTML = `
+    <div class="login-wrap">
+      <form class="login-card" id="login-form">
+        <div style="text-align:center;margin-bottom:20px">
+          <div style="width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,#2563eb,#7c3aed);color:#fff;display:inline-grid;place-items:center;font-weight:800;font-size:20px">IP</div>
+        </div>
+        <h1>${U.escape(APP_CONFIG.appName)}</h1>
+        <p class="sub">Inicia sesión para continuar</p>
+        <label class="lbl">Usuario
+          <input class="inp" name="username" value="admin" autocomplete="username" required>
+        </label>
+        <label class="lbl">Contraseña
+          <input class="inp" name="password" type="password" value="admin123" autocomplete="current-password" required>
+        </label>
+        <label class="lbl flex" style="gap:6px;align-items:center">
+          <input type="checkbox" name="remember" checked> Recordarme
+        </label>
+        <button class="btn btn-primary" type="submit">Entrar</button>
+        <div class="demo-note">${APP_CONFIG.mode === "demo" ? "Modo demo · datos en este navegador" : "Conectado a la API"}<br>Por defecto: <strong>admin / admin123</strong></div>
+      </form>
+    </div>
+  `;
+  // En login no queremos shell
+  document.getElementById("app").innerHTML = "";
+  document.getElementById("app").appendChild(host);
+
+  document.getElementById("login-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    const d = U.formData(e.target);
+    try {
+      await Auth.login(d.username, d.password, !!d.remember);
+      U.toast("Bienvenido, " + (Auth.currentUser().nombre || Auth.currentUser().username), "success");
+      renderShell();
+      location.hash = "#/dashboard";
+      Router.render();
+    } catch (err) {
+      U.toast(err.message, "danger");
+    }
+  });
+});
