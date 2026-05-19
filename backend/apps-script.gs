@@ -146,6 +146,30 @@ function createNewDatabase() {
   return url;
 }
 
+/**
+ * Limpia TODAS las pestañas (deja sólo los encabezados) y resetea contadores.
+ * Útil cuando hay datos basura y quieres empezar limpio para subir desde la app web.
+ * EJECUTA ESTA función UNA VEZ, luego desde la app web haz "Subir todo a Sheets".
+ */
+function resetSheets() {
+  const ss = ss_();
+  const props = PropertiesService.getScriptProperties();
+  TABLES.forEach(name => {
+    let sh = ss.getSheetByName(name);
+    if (!sh) {
+      sh = ss.insertSheet(name);
+      sh.appendRow(HEADERS[name]);
+      sh.getRange(1,1,1,HEADERS[name].length).setFontWeight("bold").setBackground("#e0e7ff");
+      sh.setFrozenRows(1);
+    } else if (sh.getLastRow() > 1) {
+      sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).clearContent();
+    }
+    props.deleteProperty("SEQ_" + name);
+  });
+  Logger.log("✅ Sheets limpio. Ahora ve a la app web y haz 'Subir todo a Sheets'.");
+  return "OK";
+}
+
 function initDatabase() {
   const ss = ss_();
   TABLES.forEach(name => {
