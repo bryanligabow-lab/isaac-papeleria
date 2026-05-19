@@ -25,18 +25,29 @@ Router.register("/config", async (host) => {
           </div>
         </form>
 
-        <h3 style="margin-top:24px">Conexión API (modo producción)</h3>
-        <p class="muted">Para conectar a Google Sheets vía Apps Script, pega aquí la URL <code>/exec</code> de tu Apps Script desplegado.</p>
+        <h3 style="margin-top:24px">🔗 Conexión Google Sheets</h3>
+        <div id="sync-status-box" style="padding:14px;background:var(--surface-2);border-radius:8px;border:1px solid var(--border);margin-bottom:12px">Verificando conexión…</div>
         <div class="grid grid-2">
           <label class="lbl">URL Apps Script <input class="inp" id="api-url" value="${U.escape(APP_CONFIG.apiUrl || "")}" placeholder="https://script.google.com/macros/s/.../exec"></label>
           <label class="lbl">Modo
             <select class="sel" id="api-mode">
-              <option value="demo" ${APP_CONFIG.mode === "demo" ? "selected" : ""}>Demo (localStorage)</option>
-              <option value="production" ${APP_CONFIG.mode === "production" ? "selected" : ""}>Producción (API)</option>
+              <option value="demo" ${APP_CONFIG.mode === "demo" ? "selected" : ""}>Demo (sin servidor)</option>
+              <option value="production" ${APP_CONFIG.mode === "production" ? "selected" : ""}>Producción (Sheets)</option>
             </select>
           </label>
         </div>
-        <button class="btn btn-primary" id="btn-save-api">Guardar conexión</button>
+        <div class="flex" style="gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button class="btn btn-ghost" id="btn-save-api">Guardar URL</button>
+          <button class="btn" id="btn-ping">🔍 Probar conexión</button>
+          <button class="btn btn-primary" id="btn-sync-up">🔼 Subir todo a Sheets</button>
+          <button class="btn btn-warning" id="btn-sync-down">🔽 Bajar todo de Sheets</button>
+        </div>
+        <div id="sync-progress" style="margin-top:12px;display:none">
+          <div style="background:var(--surface-2);border-radius:6px;height:10px;overflow:hidden">
+            <div id="sync-bar" style="background:var(--accent);height:100%;width:0%;transition:width .2s"></div>
+          </div>
+          <div id="sync-msg" class="muted" style="font-size:12px;margin-top:6px"></div>
+        </div>
 
         <h3 style="margin-top:24px">Auditoría</h3>
         <p class="muted">Últimos 50 eventos del sistema.</p>
@@ -99,7 +110,75 @@ Router.register("/config", async (host) => {
       const mode = host.querySelector("#api-mode").value;
       localStorage.setItem("isaac_api_url", url);
       localStorage.setItem("isaac_api_mode", mode);
+      APP_CONFIG.apiUrl = url;
+      APP_CONFIG.mode = mode;
       U.toast("Guardado. Recarga la página.", "success");
+    });
+
+    // === Sync UI ===
+    const statusBox = host.querySelector("#sync-status-box");
+    const progressBox = host.querySelector("#sync-progress");
+    const progressBar = host.querySelector("#sync-bar");
+    const progressMsg = host.querySelector("#sync-msg");
+
+    async function refreshStatus() {
+      if (!DB.isOnline()) {
+        statusBox.innerHTML = '<strong>📴 Modo demo</strong><br><span class="muted">Los datos sólo se guardan en este navegador. Configura la URL del Apps Script para conectar Google Sheets.</span>';
+        return;
+      }
+      statusBox.innerHTML = '⏳ Probando conexión con Google Sheets…';
+      const ok = await DB.pingServer();
+      const s = DB.getStatus();
+      if (ok) {
+        statusBox.innerHTML = `<strong style="color:var(--success)">🟢 Conectado a Google Sheets</strong><br>
+          <span class="muted">URL: <code style="font-size:11px">${U.escape(APP_CONFIG.apiUrl.slice(0,60))}…</code></span><br>
+          <span class="muted">Cambios pendientes en cola: <strong>${s.queueSize}</strong> · Última sync: ${s.lastSync ? new Date(s.lastSync).toLocaleString() : "—"}</span>`;
+      } else {
+        statusBox.innerHTML = '<strong style="color:var(--danger)">🔴 No se puede conectar</strong><br><span class="muted">Verifica que la URL del Apps Script sea correcta, esté desplegada como "Aplicación web" con acceso "Cualquier persona", y que hayas ejecutado <code>initDatabase</code>.</span>';
+      }
+    }
+    refreshStatus();
+
+    host.querySelector("#btn-ping").addEventListener("click", refreshStatus);
+
+    host.querySelector("#btn-sync-up").addEventListener("click", async () => {
+      if (!DB.isOnline()) return U.toast("Configura la URL primero", "warning");
+      if (!await U.confirm("Subir a Sheets",
+        "Esto sube TODA la información local (productos, ventas, compras, caja, usuarios, etc) a Google Sheets. Los registros con el mismo ID se actualizarán. Puede tardar 1-2 minutos. ¿Continuar?")) return;
+      progressBox.style.display = "block";
+      progressBar.style.width = "0%";
+      try {
+        await DB.syncUpAll((done, total, table) => {
+          progressBar.style.width = (done / total * 100) + "%";
+          progressMsg.textContent = `${done}/${total} — ${table}`;
+        });
+        progressMsg.textContent = "✅ Subida completa";
+        U.toast("Datos subidos a Sheets", "success");
+        refreshStatus();
+      } catch (e) {
+        progressMsg.textContent = "❌ Error: " + e.message;
+        U.toast("Error: " + e.message, "danger");
+      }
+    });
+
+    host.querySelector("#btn-sync-down").addEventListener("click", async () => {
+      if (!DB.isOnline()) return U.toast("Configura la URL primero", "warning");
+      if (!await U.confirm("Bajar de Sheets",
+        "Esto REEMPLAZA todos los datos locales con lo que está en Google Sheets. Los cambios locales no sincronizados se perderán. ¿Continuar?")) return;
+      progressBox.style.display = "block";
+      progressBar.style.width = "0%";
+      try {
+        await DB.syncDownAll((done, total, table) => {
+          progressBar.style.width = (done / total * 100) + "%";
+          progressMsg.textContent = `${done}/${total} — ${table}`;
+        });
+        progressMsg.textContent = "✅ Datos descargados";
+        U.toast("Datos sincronizados desde Sheets", "success");
+        setTimeout(() => location.reload(), 800);
+      } catch (e) {
+        progressMsg.textContent = "❌ Error: " + e.message;
+        U.toast("Error: " + e.message, "danger");
+      }
     });
 
     const audits = DB.list("auditoria").slice(-50).reverse();

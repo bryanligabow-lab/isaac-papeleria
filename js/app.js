@@ -96,7 +96,9 @@ function renderShell() {
           <div class="flex">
             <button class="btn btn-ghost menu-btn" id="menu-btn">☰</button>
             <h1 id="page-title">${U.escape(APP_CONFIG.appName)}</h1>
-            ${APP_CONFIG.mode === "demo" ? '<span class="pill" title="Datos guardados en este navegador">Modo demo</span>' : ''}
+            ${APP_CONFIG.mode === "demo"
+              ? '<span class="pill" title="Datos guardados en este navegador">Modo demo</span>'
+              : '<span class="pill" id="sync-pill" title="Conectado a Google Sheets">🔄 Sheets</span>'}
           </div>
           <div class="user">
             <div class="user-name">
@@ -120,6 +122,33 @@ function renderShell() {
   document.getElementById("menu-btn").addEventListener("click", () => {
     document.getElementById("sidebar").classList.toggle("open");
   });
+
+  // Indicador de sincronización
+  const syncPill = document.getElementById("sync-pill");
+  if (syncPill) {
+    const update = () => {
+      const s = DB.getStatus();
+      if (s.online === false) {
+        syncPill.textContent = "⚠️ Sin conexión";
+        syncPill.style.background = "#fef3c7";
+        syncPill.style.color = "#92400e";
+        syncPill.title = "No se pudo contactar Google Sheets — los cambios se guardan localmente y se enviarán cuando vuelva la conexión";
+      } else if (s.queueSize > 0) {
+        syncPill.textContent = `⏳ Sincronizando (${s.queueSize})`;
+        syncPill.style.background = "#fef3c7";
+        syncPill.style.color = "#92400e";
+        syncPill.title = `${s.queueSize} cambios pendientes de enviar`;
+      } else {
+        syncPill.textContent = "✓ Sheets";
+        syncPill.style.background = "#d1fae5";
+        syncPill.style.color = "#065f46";
+        syncPill.title = "Conectado a Google Sheets" + (s.lastSync ? " — última sync: " + new Date(s.lastSync).toLocaleTimeString() : "");
+      }
+    };
+    window.addEventListener("kam:sync-status", update);
+    update();
+    DB.pingServer();
+  }
 }
 
 function roleName(rolId) {

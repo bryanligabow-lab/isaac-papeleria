@@ -281,6 +281,7 @@ const DB = (() => {
     d[table].push(row);
     setDB(d);
     audit(table, "crear", row.id, row);
+    pushAsync("create", { table, row });
     return row;
   }
 
@@ -291,6 +292,7 @@ const DB = (() => {
     d[table][i] = { ...d[table][i], ...patch, updated_at: U.nowISO() };
     setDB(d);
     audit(table, "editar", id, patch);
+    pushAsync("update", { table, id, patch });
     return d[table][i];
   }
 
@@ -307,6 +309,7 @@ const DB = (() => {
     };
     setDB(d);
     audit(table, "anular", id, { motivo });
+    pushAsync("void", { table, id, motivo, userId });
     return d[table][i];
   }
 
@@ -386,6 +389,8 @@ const DB = (() => {
     const pi = d.productos.findIndex(p => p.id === producto_id);
     if (pi >= 0) d.productos[pi].costo_promedio = costoPromedio;
     setDB(d);
+    pushAsync("create", { table: "inventario_movimientos", row: mov });
+    if (pi >= 0) pushAsync("update", { table: "productos", id: producto_id, patch: { costo_promedio: costoPromedio } });
     return mov;
   }
 
@@ -415,17 +420,149 @@ const DB = (() => {
     return saldo;
   }
 
-  // API remota (apps script)
+  // ============= API remota (Apps Script / Google Sheets) =============
+  const QUEUE_KEY = "kam_sync_queue_v1";
+  const STATUS = { online: null, lastSync: null, pending: 0 };
+
   async function remote(action, payload) {
     if (!APP_CONFIG.apiUrl) throw new Error("API no configurada (modo demo).");
     const res = await fetch(APP_CONFIG.apiUrl + "?action=" + encodeURIComponent(action), {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ ...payload, token: Auth.token() })
+      body: JSON.stringify({ ...payload, token: Auth.token?.() })
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "Error remoto");
     return data.data;
+  }
+
+  function isOnline() { return APP_CONFIG.mode === "production" && !!APP_CONFIG.apiUrl; }
+
+  function loadQueue() { try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]"); } catch (e) { return []; } }
+  function saveQueue(q) { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); STATUS.pending = q.length; broadcastStatus(); }
+
+  function broadcastStatus() {
+    window.dispatchEvent(new CustomEvent("kam:sync-status", { detail: { ...STATUS } }));
+  }
+
+  // Push fire-and-forget. Si falla, se guarda en cola para reintento.
+  function pushAsync(action, payload) {
+    if (!isOnline()) return;
+    const q = loadQueue();
+    q.push({ action, payload, ts: Date.now() });
+    saveQueue(q);
+    drainQueue();
+  }
+
+  let _draining = false;
+  async function drainQueue() {
+    if (_draining || !isOnline()) return;
+    _draining = true;
+    try {
+      let q = loadQueue();
+      while (q.length) {
+        const job = q[0];
+        try {
+          await remote(job.action, job.payload);
+          q.shift();
+          saveQueue(q);
+        } catch (e) {
+          console.warn("Sync push error:", e.message);
+          // Reintentar más tarde
+          if (Date.now() - job.ts > 60000 && q.length > 1) {
+            // job antiguo bloqueando: lo mandamos al final
+            q.push(q.shift());
+            saveQueue(q);
+          } else {
+            break;
+          }
+        }
+      }
+      STATUS.lastSync = Date.now();
+      broadcastStatus();
+    } finally {
+      _draining = false;
+    }
+  }
+
+  // Reintenta periódicamente
+  if (typeof window !== "undefined") {
+    setInterval(() => { if (loadQueue().length) drainQueue(); }, 15000);
+    window.addEventListener("online", drainQueue);
+  }
+
+  // === Sync masivo (botones manuales) ===
+  async function syncUpAll(onProgress) {
+    if (!isOnline()) throw new Error("Modo demo, configura la URL primero");
+    const db = getDB();
+    let total = 0, done = 0;
+    TABLES.forEach(t => total += (db[t] || []).length);
+    for (const table of TABLES) {
+      let serverIds = new Set();
+      try {
+        const serverRows = await remote("list", { table });
+        serverIds = new Set(serverRows.map(r => String(r.id)));
+      } catch (e) {
+        console.warn("syncUp list " + table + ":", e.message);
+      }
+      for (const row of (db[table] || [])) {
+        try {
+          if (row.id != null && serverIds.has(String(row.id))) {
+            await remote("update", { table, id: row.id, patch: row });
+          } else {
+            await remote("create", { table, row });
+          }
+        } catch (e) {
+          console.warn(`syncUp ${table}#${row.id}:`, e.message);
+        }
+        done++;
+        onProgress?.(done, total, table);
+      }
+    }
+    STATUS.lastSync = Date.now();
+    STATUS.online = true;
+    broadcastStatus();
+    return { total, done };
+  }
+
+  async function syncDownAll(onProgress) {
+    if (!isOnline()) throw new Error("Modo demo, configura la URL primero");
+    const db = getDB();
+    let done = 0;
+    for (const table of TABLES) {
+      try {
+        const rows = await remote("list", { table });
+        db[table] = rows || [];
+      } catch (e) {
+        console.warn("syncDown " + table + ":", e.message);
+      }
+      done++;
+      onProgress?.(done, TABLES.length, table);
+    }
+    // recalcular secuencias para que nuevos inserts no choquen
+    db._seq = db._seq || {};
+    TABLES.forEach(t => {
+      const ids = (db[t] || []).map(r => Number(r.id) || 0);
+      if (ids.length) db._seq[t] = Math.max(...ids);
+    });
+    setDB(db);
+    STATUS.lastSync = Date.now();
+    STATUS.online = true;
+    broadcastStatus();
+  }
+
+  async function pingServer() {
+    if (!isOnline()) { STATUS.online = false; broadcastStatus(); return false; }
+    try {
+      await remote("list", { table: "config" });
+      STATUS.online = true;
+      broadcastStatus();
+      return true;
+    } catch (e) {
+      STATUS.online = false;
+      broadcastStatus();
+      return false;
+    }
   }
 
   async function resetDemo() {
@@ -440,6 +577,9 @@ const DB = (() => {
     stockOf, avgCostOf, lastInvMovement, pushInvMovement,
     activeCajaSession, pushCajaMov, cajaBalance,
     remote, resetDemo, loadKamCatalog, seedCatalog,
+    syncUpAll, syncDownAll, pingServer, isOnline,
+    getStatus: () => ({ ...STATUS, queueSize: loadQueue().length }),
+    drainQueue,
     KAM_PRODUCTOS, KAM_CATEGORIAS, TABLES
   };
 })();
