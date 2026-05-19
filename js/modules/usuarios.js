@@ -69,13 +69,14 @@ Router.register("/usuarios", async (host) => {
 
   async function openUser(u = {}) {
     const roles = DB.list("roles", { activo: true });
+    const isEdit = !!u.id;
     const div = document.createElement("div");
     div.innerHTML = `
       <div class="modal-backdrop" id="mdl">
         <form class="modal" id="frm">
-          <h3>${u.id ? "Editar usuario" : "Nuevo usuario"}</h3>
+          <h3>${isEdit ? "Editar usuario" : "Nuevo usuario"}</h3>
           <div class="grid grid-2">
-            <label class="lbl">Usuario <input class="inp" name="username" value="${U.escape(u.username || "")}" required ${u.id ? "readonly" : ""}></label>
+            <label class="lbl">Usuario <input class="inp" name="username" value="${U.escape(u.username || "")}" required ${isEdit ? "readonly" : ""}></label>
             <label class="lbl">Nombre completo <input class="inp" name="nombre" value="${U.escape(u.nombre || "")}"></label>
             <label class="lbl">Email <input class="inp" type="email" name="email" value="${U.escape(u.email || "")}"></label>
             <label class="lbl">Rol
@@ -84,7 +85,10 @@ Router.register("/usuarios", async (host) => {
               </select>
             </label>
             <label class="lbl">Telegram ID <input class="inp" name="telegram_id" value="${U.escape(u.telegram_id || "")}"></label>
-            ${u.id ? "" : `<label class="lbl">Contraseña inicial <input class="inp" type="password" name="password" required></label>`}
+            <label class="lbl">
+              ${isEdit ? "Nueva contraseña <span class='muted' style='font-size:11px'>(dejar vacío para no cambiar)</span>" : "Contraseña inicial"}
+              <input class="inp" type="password" name="password" autocomplete="new-password" ${isEdit ? "" : "required minlength=\"3\""}>
+            </label>
             <label class="lbl">Activo <input type="checkbox" name="activo" ${u.activo !== false ? "checked" : ""}></label>
           </div>
           <div class="modal-actions">
@@ -96,23 +100,35 @@ Router.register("/usuarios", async (host) => {
     `;
     document.body.appendChild(div);
     const mdl = div.querySelector("#mdl");
-    mdl.addEventListener("click", e => { if (e.target.dataset.close !== undefined || e.target === mdl) mdl.remove(); });
+    const closeMdl = () => { div.remove(); };
+    mdl.addEventListener("click", e => { if (e.target.dataset.close !== undefined || e.target === mdl) closeMdl(); });
     mdl.querySelector("#frm").addEventListener("submit", async e => {
       e.preventDefault();
       const data = U.formData(e.target);
       data.rol_id = Number(data.rol_id);
       data.activo = e.target.querySelector("[name=activo]").checked;
+      const password = data.password;
+      delete data.password;
       try {
-        if (u.id) {
+        if (isEdit) {
+          // si dieron password nueva, actualizamos hash+salt
+          if (password && password.trim()) {
+            const salt = U.uid();
+            const hash = await U.sha256(password + salt);
+            data.password_hash = hash;
+            data.salt = salt;
+          }
           DB.update("usuarios", u.id, data);
         } else {
+          if (!password || password.length < 3) {
+            return U.toast("Contraseña debe tener mínimo 3 caracteres", "danger");
+          }
           const salt = U.uid();
-          const hash = await U.sha256(data.password + salt);
-          delete data.password;
+          const hash = await U.sha256(password + salt);
           DB.insert("usuarios", { ...data, password_hash: hash, salt });
         }
-        U.toast("Usuario guardado", "success");
-        mdl.remove();
+        U.toast(isEdit ? "Usuario actualizado" : "Usuario creado", "success");
+        closeMdl();
         refresh();
       } catch (err) { U.toast(err.message, "danger"); }
     });
@@ -150,7 +166,8 @@ Router.register("/usuarios", async (host) => {
     `;
     document.body.appendChild(div);
     const mdl = div.querySelector("#mdl");
-    mdl.addEventListener("click", e => { if (e.target.dataset.close !== undefined || e.target === mdl) mdl.remove(); });
+    const closeMdl = () => div.remove();
+    mdl.addEventListener("click", e => { if (e.target.dataset.close !== undefined || e.target === mdl) closeMdl(); });
     mdl.querySelector("#frm").addEventListener("submit", e => {
       e.preventDefault();
       const data = U.formData(e.target);
@@ -158,23 +175,34 @@ Router.register("/usuarios", async (host) => {
       if (r.id) DB.update("roles", r.id, data);
       else DB.insert("roles", data);
       U.toast("Rol guardado", "success");
-      mdl.remove();
+      closeMdl();
       refresh();
     });
   }
 
   async function openPermisos(rolId) {
+    rolId = Number(rolId);
     const rol = DB.get("roles", rolId);
+    if (!rol) return U.toast("Rol no encontrado", "danger");
     const permisos = DB.list("permisos");
-    const asignados = new Set(DB.list("roles_permisos", { rol_id: rolId }).map(x => x.permiso_id));
+    const asignados = new Set(
+      DB.list("roles_permisos").filter(x => Number(x.rol_id) === rolId).map(x => Number(x.permiso_id))
+    );
     const modulos = [...new Set(permisos.map(p => p.modulo))];
+    const isAdmin = rolId === 1;
 
     const div = document.createElement("div");
     div.innerHTML = `
       <div class="modal-backdrop" id="mdl">
         <form class="modal lg" id="frm" style="max-height:85vh;overflow:auto">
-          <h3>Permisos — ${U.escape(rol.nombre)}</h3>
-          ${rolId === 1 ? '<p class="muted">El rol Administrador tiene acceso total. Esta configuración es informativa.</p>' : ""}
+          <h3>Permisos — ${U.escape(rol.nombre)} <span class="muted" style="font-size:12px;font-weight:normal">(${asignados.size} de ${permisos.length})</span></h3>
+          ${isAdmin ? '<p class="muted">⚠️ El rol Administrador siempre tiene acceso total. Esta configuración es informativa.</p>' : `
+            <div class="flex" style="gap:6px;margin-bottom:8px">
+              <button type="button" class="btn btn-sm" id="btn-all">✓ Marcar todo</button>
+              <button type="button" class="btn btn-sm" id="btn-none">✗ Desmarcar todo</button>
+              <button type="button" class="btn btn-sm" id="btn-view-all">👁 Solo "ver"</button>
+            </div>
+          `}
           <table class="data-table">
             <thead><tr><th>Módulo</th><th class="center">Ver</th><th class="center">Crear</th><th class="center">Editar</th><th class="center">Anular</th></tr></thead>
             <tbody>
@@ -184,7 +212,8 @@ Router.register("/usuarios", async (host) => {
                   ${["ver","crear","editar","anular"].map(a => {
                     const p = permisos.find(x => x.modulo === m && x.accion === a);
                     if (!p) return "<td></td>";
-                    return `<td class="center"><input type="checkbox" name="perm" value="${p.id}" ${asignados.has(p.id) ? "checked" : ""} ${rolId === 1 ? "disabled checked" : ""}></td>`;
+                    const checked = isAdmin || asignados.has(Number(p.id));
+                    return `<td class="center"><input type="checkbox" name="perm" data-action="${a}" value="${p.id}" ${checked ? "checked" : ""} ${isAdmin ? "disabled" : ""}></td>`;
                   }).join("")}
                 </tr>
               `).join("")}
@@ -192,24 +221,46 @@ Router.register("/usuarios", async (host) => {
           </table>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cerrar</button>
-            ${rolId !== 1 ? '<button type="submit" class="btn btn-primary">Guardar permisos</button>' : ""}
+            ${!isAdmin ? '<button type="submit" class="btn btn-primary">Guardar permisos</button>' : ""}
           </div>
         </form>
       </div>
     `;
     document.body.appendChild(div);
     const mdl = div.querySelector("#mdl");
-    mdl.addEventListener("click", e => { if (e.target.dataset.close !== undefined || e.target === mdl) mdl.remove(); });
+    const closeMdl = () => div.remove();
+    mdl.addEventListener("click", e => { if (e.target.dataset.close !== undefined || e.target === mdl) closeMdl(); });
+
+    // Botones de selección rápida
+    if (!isAdmin) {
+      mdl.querySelector("#btn-all").addEventListener("click", () => {
+        mdl.querySelectorAll("[name=perm]").forEach(c => c.checked = true);
+      });
+      mdl.querySelector("#btn-none").addEventListener("click", () => {
+        mdl.querySelectorAll("[name=perm]").forEach(c => c.checked = false);
+      });
+      mdl.querySelector("#btn-view-all").addEventListener("click", () => {
+        mdl.querySelectorAll("[name=perm]").forEach(c => c.checked = c.dataset.action === "ver");
+      });
+    }
+
     mdl.querySelector("#frm").addEventListener("submit", e => {
       e.preventDefault();
+      if (isAdmin) { closeMdl(); return; }
       const checked = [...e.target.querySelectorAll("[name=perm]:checked")].map(c => Number(c.value));
       const db = DB.getDB();
-      db.roles_permisos = db.roles_permisos.filter(x => x.rol_id !== rolId);
-      checked.forEach(pid => db.roles_permisos.push({ rol_id: rolId, permiso_id: pid }));
+      // limpiar todos los permisos de ESTE rol y volver a poner
+      db.roles_permisos = (db.roles_permisos || []).filter(x => Number(x.rol_id) !== rolId);
+      checked.forEach(pid => {
+        db._seq = db._seq || {};
+        db._seq.roles_permisos = (db._seq.roles_permisos || 0) + 1;
+        db.roles_permisos.push({ id: db._seq.roles_permisos, rol_id: rolId, permiso_id: pid });
+      });
       DB.setDB(db);
-      DB.audit("usuarios", "editar", rolId, { rol_permisos: checked });
-      U.toast("Permisos guardados", "success");
-      mdl.remove();
+      DB.audit("usuarios", "editar", rolId, { rol_permisos: checked.length + " permisos" });
+      U.toast(`✓ Permisos guardados (${checked.length})`, "success");
+      closeMdl();
+      refresh();
     });
   }
 }, { module: "usuarios" });
