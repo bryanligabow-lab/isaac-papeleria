@@ -194,7 +194,7 @@ function login_(body) {
   if (!u) throw new Error("Usuario no encontrado");
   if (sha256_(body.password + u.salt) !== u.password_hash) throw new Error("Contraseña incorrecta");
   const token = Utilities.getUuid();
-  appendRow_("sesiones", { token, usuario_id: u.id, created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 8 * 3600_000).toISOString(), ip: "" });
+  appendRow_("sesiones", { token, usuario_id: u.id, created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 8 * 3600000).toISOString(), ip: "" });
   delete u.password_hash; delete u.salt;
   return { token, user: u };
 }
@@ -582,7 +582,7 @@ function utilidadCmd_(chat_id, text) {
   const now = new Date();
   let from;
   if (arg === "mes") from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
-  else if (arg === "semana") from = new Date(now.getTime() - 7 * 86400_000).toISOString().slice(0,10);
+  else if (arg === "semana") from = new Date(now.getTime() - 7 * 86400000).toISOString().slice(0,10);
   else from = now.toISOString().slice(0,10);
   const today = now.toISOString().slice(0,10);
   const v = readAll_("ventas").filter(x => x.estado !== "anulada" && String(x.fecha).slice(0,10) >= from && String(x.fecha).slice(0,10) <= today);
