@@ -424,17 +424,29 @@ const DB = (() => {
   const QUEUE_KEY = "kam_sync_queue_v1";
   const STATUS = { online: null, lastSync: null, pending: 0 };
 
-  async function remote(action, payload) {
+  async function remote(action, payload, timeoutMs = 15000) {
     if (!APP_CONFIG.apiUrl) throw new Error("API no configurada (modo demo).");
-    const res = await fetch(APP_CONFIG.apiUrl + "?action=" + encodeURIComponent(action), {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ ...payload, token: Auth.token?.() })
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || "Error remoto");
-    return data.data;
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(APP_CONFIG.apiUrl + "?action=" + encodeURIComponent(action), {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ ...payload, token: Auth.token?.() }),
+        signal: ctrl.signal
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); }
+      catch (e) { throw new Error("Respuesta no JSON: " + text.slice(0, 100)); }
+      if (!data.ok) throw new Error(data.error || "Error remoto");
+      return data.data;
+    } finally {
+      clearTimeout(tid);
+    }
   }
+
+  const _sleep = ms => new Promise(r => setTimeout(r, ms));
 
   function isOnline() { return APP_CONFIG.mode === "production" && !!APP_CONFIG.apiUrl; }
 
@@ -492,37 +504,58 @@ const DB = (() => {
   }
 
   // === Sync masivo (botones manuales) ===
+  // Tablas que se sincronizan. Excluye 'auditoria' (log) y 'sesiones' (volátil).
+  const SYNC_TABLES = TABLES.filter(t => !["auditoria","sesiones","telegram_logs"].includes(t));
+
   async function syncUpAll(onProgress) {
     if (!isOnline()) throw new Error("Modo demo, configura la URL primero");
     const db = getDB();
-    let total = 0, done = 0;
-    TABLES.forEach(t => total += (db[t] || []).length);
-    for (const table of TABLES) {
+    let total = 0, done = 0, errors = 0;
+    SYNC_TABLES.forEach(t => total += (db[t] || []).length);
+
+    for (const table of SYNC_TABLES) {
+      const rows = db[table] || [];
+      if (!rows.length) continue;
+
       let serverIds = new Set();
       try {
         const serverRows = await remote("list", { table });
-        serverIds = new Set(serverRows.map(r => String(r.id)));
+        serverIds = new Set((serverRows || []).map(r => String(r.id)));
       } catch (e) {
         console.warn("syncUp list " + table + ":", e.message);
+        await _sleep(2000); // retroceso ante error
       }
-      for (const row of (db[table] || [])) {
-        try {
-          if (row.id != null && serverIds.has(String(row.id))) {
-            await remote("update", { table, id: row.id, patch: row });
-          } else {
-            await remote("create", { table, row });
+
+      for (const row of rows) {
+        let attempt = 0;
+        const maxAttempts = 3;
+        while (attempt < maxAttempts) {
+          try {
+            if (row.id != null && serverIds.has(String(row.id))) {
+              await remote("update", { table, id: row.id, patch: row });
+            } else {
+              await remote("create", { table, row });
+            }
+            break; // éxito
+          } catch (e) {
+            attempt++;
+            console.warn(`syncUp ${table}#${row.id} intento ${attempt}:`, e.message);
+            if (attempt >= maxAttempts) {
+              errors++;
+              break;
+            }
+            await _sleep(1500 * attempt); // backoff exponencial
           }
-        } catch (e) {
-          console.warn(`syncUp ${table}#${row.id}:`, e.message);
         }
         done++;
-        onProgress?.(done, total, table);
+        onProgress?.(done, total, table, errors);
+        await _sleep(120); // delay entre requests para evitar rate limit
       }
     }
     STATUS.lastSync = Date.now();
     STATUS.online = true;
     broadcastStatus();
-    return { total, done };
+    return { total, done, errors };
   }
 
   async function syncDownAll(onProgress) {

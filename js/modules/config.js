@@ -148,12 +148,12 @@ Router.register("/config", async (host) => {
       progressBox.style.display = "block";
       progressBar.style.width = "0%";
       try {
-        await DB.syncUpAll((done, total, table) => {
+        const result = await DB.syncUpAll((done, total, table, errors) => {
           progressBar.style.width = (done / total * 100) + "%";
-          progressMsg.textContent = `${done}/${total} — ${table}`;
+          progressMsg.textContent = `${done}/${total} — ${table}` + (errors ? ` · ⚠️ ${errors} errores` : "");
         });
-        progressMsg.textContent = "✅ Subida completa";
-        U.toast("Datos subidos a Sheets", "success");
+        progressMsg.textContent = `✅ Subida completa (${result.done}/${result.total}` + (result.errors ? ` · ${result.errors} errores` : "") + ")";
+        U.toast(`Subidos ${result.done} registros a Sheets`, "success");
         refreshStatus();
       } catch (e) {
         progressMsg.textContent = "❌ Error: " + e.message;
