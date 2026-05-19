@@ -13,6 +13,8 @@ Router.register("/egresos", async (host) => {
       { key: "concepto", label: "Concepto" },
       { key: "metodo", label: "Método", render: r => U.escape(DB.get("metodos_pago", r.metodo_pago_id)?.nombre || "—") },
       { key: "valor", label: "Valor", render: r => U.money(r.valor) },
+      { key: "afecta", label: "Afecta caja", render: r => r.afecta_caja === false ? '<span class="tag tag-anulada">No</span>' : `<span class="tag tag-pagada">Sí</span>` },
+      { key: "usuario_caja", label: "Usuario caja", render: r => U.escape(DB.get("usuarios", r.usuario_caja_id)?.username || DB.get("usuarios", r.created_by)?.username || "—") },
       { key: "estado", label: "Estado", render: r => `<span class="tag tag-${r.estado}">${U.escape(r.estado)}</span>` },
       { key: "soporte", label: "Soporte", render: r => r.soporte_url ? `<a href="${U.escape(r.soporte_url)}" target="_blank">ver</a>` : "—" },
       { key: "act", label: "", render: r => `
@@ -60,6 +62,15 @@ Router.register("/egresos", async (host) => {
   function openEgreso() {
     const metodos = DB.list("metodos_pago", { activo: true });
     const cajas = DB.list("cajas", { activo: true });
+    const usuarios = DB.list("usuarios", { activo: true });
+    const cajaDefault = cajas[0]?.id;
+
+    // Si hay sesión abierta en la caja por defecto, sugerir su usuario
+    function sugerirUsuarioCaja(cajaId) {
+      const ses = DB.activeCajaSession(cajaId);
+      return ses ? ses.usuario_id : Auth.currentUser().id;
+    }
+
     const div = document.createElement("div");
     div.innerHTML = `
       <div class="modal-backdrop" id="mdl">
@@ -74,12 +85,29 @@ Router.register("/egresos", async (host) => {
               <select class="sel" name="metodo_pago_id" required>${metodos.map(m => `<option value="${m.id}">${U.escape(m.nombre)}</option>`).join("")}</select>
             </label>
             <label class="lbl">Caja
-              <select class="sel" name="caja_id" required>${cajas.map(c => `<option value="${c.id}">${U.escape(c.nombre)}</option>`).join("")}</select>
+              <select class="sel" name="caja_id" id="eg-caja" required>${cajas.map(c => `<option value="${c.id}">${U.escape(c.nombre)}</option>`).join("")}</select>
             </label>
             <label class="lbl">Valor<input class="inp" type="number" name="valor" min="0" step="0.01" required></label>
+            <label class="lbl">Usuario responsable de la caja
+              <select class="sel" name="usuario_caja_id" id="eg-user-caja" required>
+                ${usuarios.map(u => `<option value="${u.id}" ${u.id === sugerirUsuarioCaja(cajaDefault) ? "selected" : ""}>${U.escape(u.nombre || u.username)}</option>`).join("")}
+              </select>
+            </label>
             <label class="lbl">Soporte (URL imagen)<input class="inp" name="soporte_url" placeholder="https://..."></label>
             <label class="lbl">Subir soporte (imagen)<input class="inp" type="file" id="soporte-file" accept="image/*"></label>
           </div>
+
+          <div style="margin-top:8px;padding:12px;background:var(--surface-2);border-radius:8px;border:1px solid var(--border)">
+            <label class="flex" style="gap:8px;align-items:flex-start;cursor:pointer">
+              <input type="checkbox" name="afecta_caja" id="eg-afecta" checked style="margin-top:2px">
+              <div>
+                <div><strong>Afecta el cierre de caja</strong></div>
+                <div class="muted" style="font-size:12px">Si está marcado, este egreso descontará el saldo de la caja seleccionada y aparecerá en el cierre. Desmarca para registrar el egreso solo para contabilidad sin tocar la caja física.</div>
+              </div>
+            </label>
+            <div id="eg-sesion-info" class="muted" style="font-size:12px;margin-top:6px;margin-left:26px"></div>
+          </div>
+
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
             <button type="submit" class="btn btn-primary">Registrar egreso</button>
@@ -100,25 +128,58 @@ Router.register("/egresos", async (host) => {
       reader.readAsDataURL(f);
     });
 
+    // info dinámica: sesión abierta de la caja seleccionada
+    function refreshSesionInfo() {
+      const cajaId = U.num(mdl.querySelector("#eg-caja").value);
+      const ses = DB.activeCajaSession(cajaId);
+      const userSel = mdl.querySelector("#eg-user-caja");
+      const info = mdl.querySelector("#eg-sesion-info");
+      if (ses) {
+        const u = DB.get("usuarios", ses.usuario_id);
+        info.innerHTML = `🟢 Caja abierta por <strong>${U.escape(u?.nombre || u?.username || "—")}</strong> desde ${U.fmtDate(ses.fecha_apertura)}. Saldo actual: <strong>${U.money(DB.cajaBalance(cajaId))}</strong>`;
+        userSel.value = ses.usuario_id;
+      } else {
+        info.innerHTML = `⚠️ No hay sesión abierta en esta caja. El egreso quedará registrado pero recuerda abrir la caja para el cierre del día.`;
+      }
+    }
+    mdl.querySelector("#eg-caja").addEventListener("change", refreshSesionInfo);
+    refreshSesionInfo();
+
     mdl.querySelector("#frm").addEventListener("submit", e => {
       e.preventDefault();
       const data = U.formData(e.target);
+      const afecta = mdl.querySelector("#eg-afecta").checked;
+      const cajaId = U.num(data.caja_id);
+      const userCajaId = U.num(data.usuario_caja_id);
+
       const eg = DB.insert("comprobantes_egreso", {
-        ...data,
+        numero: data.numero,
         fecha: data.fecha + "T" + new Date().toTimeString().slice(0,8),
+        beneficiario: data.beneficiario,
+        concepto: data.concepto,
         metodo_pago_id: U.num(data.metodo_pago_id),
-        caja_id: U.num(data.caja_id),
+        caja_id: cajaId,
         valor: U.num(data.valor),
+        soporte_url: data.soporte_url || "",
+        afecta_caja: afecta,
+        usuario_caja_id: userCajaId,
         estado: "emitido",
         created_by: Auth.currentUser().id
       });
-      DB.pushCajaMov({
-        caja_id: U.num(data.caja_id), fecha: eg.fecha,
-        tipo: "egreso", concepto: `${data.concepto} (${eg.numero})`,
-        referencia_tipo: "egreso", referencia_id: eg.id,
-        metodo_pago_id: U.num(data.metodo_pago_id), monto: U.num(data.valor)
-      });
-      U.toast(`Egreso ${eg.numero} registrado`, "success");
+
+      if (afecta) {
+        DB.pushCajaMov({
+          caja_id: cajaId, fecha: eg.fecha,
+          tipo: "egreso", concepto: `${data.concepto} (${eg.numero})`,
+          referencia_tipo: "egreso", referencia_id: eg.id,
+          metodo_pago_id: U.num(data.metodo_pago_id), monto: U.num(data.valor),
+          usuario_id: userCajaId
+        });
+        U.toast(`Egreso ${eg.numero} registrado · descuenta caja`, "success");
+      } else {
+        U.toast(`Egreso ${eg.numero} registrado (NO afecta caja)`, "success");
+      }
+
       mdl.remove();
       refresh(currentFilters());
     });
@@ -129,12 +190,16 @@ Router.register("/egresos", async (host) => {
     if (!motivo) return;
     const eg = DB.get("comprobantes_egreso", id);
     if (eg.estado === "anulada") return;
-    DB.pushCajaMov({
-      caja_id: eg.caja_id, fecha: U.nowISO(),
-      tipo: "ingreso", concepto: `Anulación egreso ${eg.numero}`,
-      referencia_tipo: "egreso_anulacion", referencia_id: id,
-      metodo_pago_id: eg.metodo_pago_id, monto: eg.valor
-    });
+    // Solo revertir caja si el egreso original la afectó
+    if (eg.afecta_caja !== false) {
+      DB.pushCajaMov({
+        caja_id: eg.caja_id, fecha: U.nowISO(),
+        tipo: "ingreso", concepto: `Anulación egreso ${eg.numero}`,
+        referencia_tipo: "egreso_anulacion", referencia_id: id,
+        metodo_pago_id: eg.metodo_pago_id, monto: eg.valor,
+        usuario_id: eg.usuario_caja_id || Auth.currentUser().id
+      });
+    }
     DB.voidRow("comprobantes_egreso", id, motivo, Auth.currentUser().id);
     U.toast("Egreso anulado", "warning");
     refresh(currentFilters());
