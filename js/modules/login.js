@@ -30,13 +30,20 @@ Router.register("/login", async (host) => {
     e.preventDefault();
     const d = U.formData(e.target);
     try {
+      const submitBtn = e.target.querySelector("button[type=submit]");
+      submitBtn.disabled = true;
+      submitBtn.textContent = APP_CONFIG.mode === "production" ? "Verificando con servidor..." : "Entrando...";
       await Auth.login(d.username, d.password, !!d.remember);
       U.toast("Bienvenido, " + (Auth.currentUser().nombre || Auth.currentUser().username), "success");
       renderShell();
       location.hash = "#/dashboard";
       Router.render();
+      // Arrancar sync periódico tras login exitoso
+      if (window.startPeriodicSync) window.startPeriodicSync();
     } catch (err) {
-      U.toast(err.message, "danger");
+      U.toast(err.message, "danger", 5000);
+      const submitBtn = e.target.querySelector("button[type=submit]");
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Entrar"; }
     }
   });
 });

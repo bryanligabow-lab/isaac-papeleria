@@ -587,7 +587,6 @@ const DB = (() => {
   async function pingServer() {
     if (!isOnline()) { STATUS.online = false; broadcastStatus(); return false; }
     try {
-      // Usar GET (no necesita CORS preflight ni body)
       const res = await fetch(APP_CONFIG.apiUrl + "?action=ping", { method: "GET" });
       const data = await res.json();
       const ok = !!data && data.ok !== false;
@@ -599,6 +598,35 @@ const DB = (() => {
       STATUS.online = false;
       broadcastStatus();
       return false;
+    }
+  }
+
+  // Verifica salud completa: ping + acceso al spreadsheet
+  async function healthCheck() {
+    if (!isOnline()) return { ok: false, code: "demo_mode", message: "Modo demo (sin servidor)" };
+    try {
+      // 1. Ping
+      const pingRes = await fetch(APP_CONFIG.apiUrl + "?action=ping", { method: "GET" });
+      if (!pingRes.ok) return { ok: false, code: "ping_fail", message: "El servidor no responde" };
+      try { await pingRes.json(); }
+      catch (e) { return { ok: false, code: "bad_url", message: "URL de Apps Script inválida o no implementada" }; }
+
+      // 2. Acceso a hoja (requiere SPREADSHEET_ID)
+      const listRes = await fetch(APP_CONFIG.apiUrl + "?action=list&table=usuarios", { method: "GET" });
+      const text = await listRes.text();
+      if (text.includes("SPREADSHEET_ID no configurado")) {
+        return { ok: false, code: "no_spreadsheet_id", message: "Falta configurar SPREADSHEET_ID en Apps Script" };
+      }
+      let data;
+      try { data = JSON.parse(text); }
+      catch (e) { return { ok: false, code: "bad_response", message: "Respuesta inesperada del servidor" }; }
+      if (!data.ok) return { ok: false, code: "server_error", message: data.error || "Error del servidor" };
+      if (!Array.isArray(data.data) || data.data.length === 0) {
+        return { ok: false, code: "no_init", message: "La base de datos está vacía. Ejecuta initDatabase en Apps Script." };
+      }
+      return { ok: true, code: "ok", message: "Conexión OK", users: data.data.length };
+    } catch (e) {
+      return { ok: false, code: "network", message: "Error de red: " + e.message };
     }
   }
 
@@ -614,7 +642,7 @@ const DB = (() => {
     stockOf, avgCostOf, lastInvMovement, pushInvMovement,
     activeCajaSession, pushCajaMov, cajaBalance,
     remote, resetDemo, loadKamCatalog, seedCatalog,
-    syncUpAll, syncDownAll, pingServer, isOnline,
+    syncUpAll, syncDownAll, pingServer, healthCheck, isOnline,
     getStatus: () => ({ ...STATUS, queueSize: loadQueue().length }),
     drainQueue,
     KAM_PRODUCTOS, KAM_CATEGORIAS, TABLES
