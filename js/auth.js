@@ -22,6 +22,45 @@ const Auth = (() => {
   }
 
   async function login(username, password, remember = true) {
+    // Modo producción: autenticar contra Google Sheets (Apps Script)
+    if (APP_CONFIG.mode === "production" && APP_CONFIG.apiUrl) {
+      try {
+        const res = await fetch(APP_CONFIG.apiUrl + "?action=login", {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ username, password })
+        });
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); }
+        catch (e) { throw new Error("Respuesta no válida del servidor"); }
+        if (!data.ok) throw new Error(data.error || "Error de login");
+        const remoteUser = data.data.user;
+        const remoteToken = data.data.token;
+        session = { token: remoteToken, user: remoteUser };
+        saveSession(remember);
+        // Sincronizar datos del servidor a local tras el login
+        try { await DB.syncDownAll(); } catch (e) { console.warn("Sync inicial fallida:", e.message); }
+        // Asegurar que el usuario quede en la cache local
+        const dbAfter = DB.getDB();
+        if (!dbAfter.usuarios.find(u => Number(u.id) === Number(remoteUser.id))) {
+          dbAfter.usuarios.push(remoteUser);
+          DB.setDB(dbAfter);
+        }
+        DB.audit("auth", "login", remoteUser.id, { username, modo: "remoto" });
+        return remoteUser;
+      } catch (e) {
+        // Si el error es de configuración del servidor, mostrarlo claro
+        if (/SPREADSHEET_ID/i.test(e.message)) {
+          throw new Error("El servidor no está configurado. Falta SPREADSHEET_ID en Apps Script.");
+        }
+        // Cualquier otro error de red → intentar fallback local sólo para admin original
+        console.warn("Login remoto falló:", e.message);
+        throw new Error(e.message || "No se pudo conectar al servidor");
+      }
+    }
+
+    // Modo demo: autenticar contra localStorage
     const users = DB.list("usuarios");
     const u = users.find(x => x.username === username && x.activo);
     if (!u) throw new Error("Usuario no encontrado");
