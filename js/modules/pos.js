@@ -37,7 +37,15 @@ Router.register("/pos", async (host) => {
             <div class="pos-cat-chip active" data-cat="">Todos</div>
             ${categorias.map(c => `<div class="pos-cat-chip" data-cat="${c.id}">${ICONS[c.nombre] || "•"} ${U.escape(c.nombre)}</div>`).join("")}
           </div>
-          <div class="pos-results" id="pos-results"></div>
+          <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+            <div class="pos-list-header">
+              <span>Producto</span>
+              <span style="text-align:center">SKU</span>
+              <span style="text-align:center">Stock</span>
+              <span style="text-align:right">Precio</span>
+            </div>
+            <div class="pos-results" id="pos-results" style="border-radius:0 0 12px 12px"></div>
+          </div>
         </div>
 
         <!-- DERECHA -->
@@ -103,19 +111,15 @@ Router.register("/pos", async (host) => {
       }
       results.innerHTML = rows.map((p, i) => {
         const stock = DB.stockOf(p.id);
-        let badgeCls = "", badgeTxt = "";
-        if (stock <= 0) { badgeCls = "zero"; badgeTxt = "Sin stock"; }
-        else if (stock < U.num(p.stock_minimo)) { badgeCls = "low"; badgeTxt = `${stock}`; }
-        else { badgeTxt = `${stock}`; }
-        const icon = productIcon(p);
+        let stockCls = "";
+        if (stock <= 0) stockCls = "zero";
+        else if (stock < U.num(p.stock_minimo)) stockCls = "low";
+        const stockTxt = stock <= 0 ? "Sin stock" : `<strong>${stock}</strong>`;
         return `
           <div class="pos-card ${stock <= 0 ? "no-stock" : ""} ${i === 0 ? "focused" : ""}" data-id="${p.id}" data-i="${i}">
-            <div class="pos-card-thumb">
-              ${icon}
-              <span class="stock-badge ${badgeCls}">${badgeTxt}</span>
-            </div>
-            <div class="sku">${U.escape(p.sku)}</div>
             <div class="name">${U.escape(p.nombre)}</div>
+            <div class="sku">${U.escape(p.sku)}</div>
+            <div class="stock ${stockCls}">${stockTxt}</div>
             <div class="price">${U.money(p.precio_venta)}</div>
           </div>
         `;
