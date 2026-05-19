@@ -1,62 +1,79 @@
-// Punto de Venta (POS) — interfaz rápida para vender.
-// Atajos:
-//   F2  → enfocar buscador
-//   F9  → limpiar carrito
-//   F12 → cobrar (modal de pago con cálculo de cambio)
-//   Esc → cerrar modales
-//   ↑/↓ → navegar resultados de búsqueda
-//   Enter → agregar producto al carrito
+// Punto de Venta (POS) — diseño limpio.
+// Atajos: F2 buscar · F9 limpiar · F12 cobrar · Esc cerrar · ↑↓ navegar · Enter agregar
 Router.register("/pos", async (host) => {
   document.getElementById("page-title").textContent = "Punto de venta";
 
-  const cart = []; // [{ producto_id, nombre, sku, precio, costo, cantidad, stock }]
+  const cart = [];
   let resultsFocus = 0;
+  let activeCat = null;
   let lastResults = [];
+
+  // Iconos según categoría/nombre
+  const ICONS = {
+    "Útiles escolares": "✏️", "Oficina": "📎", "Arte": "🎨",
+    "Tecnología": "💻", "Otros": "📦"
+  };
+
+  function productIcon(p) {
+    const cat = DB.get("categorias", p.categoria_id);
+    return ICONS[cat?.nombre] || (p.sku || "?").slice(0, 2).toUpperCase();
+  }
 
   function render() {
     const productos = DB.list("productos", { activo: true });
-    const clientes = DB.list("clientes", { activo: true });
+    const categorias = DB.list("categorias", { activo: true });
     const metodos = DB.list("metodos_pago", { activo: true });
     const cajas = DB.list("cajas", { activo: true });
+    const clientes = DB.list("clientes", { activo: true });
 
     host.innerHTML = `
       <div class="pos-wrap">
-        <!-- IZQUIERDA: búsqueda y resultados -->
+        <!-- IZQUIERDA -->
         <div class="pos-left">
           <div class="pos-search">
-            <input id="pos-search-inp" placeholder="🔍 Buscar producto por nombre, SKU o código…  (F2 enfoca)" autocomplete="off">
+            <input id="pos-search-inp" placeholder="Buscar producto por nombre o SKU…" autocomplete="off">
+          </div>
+          <div class="pos-cats" id="pos-cats">
+            <div class="pos-cat-chip active" data-cat="">Todos</div>
+            ${categorias.map(c => `<div class="pos-cat-chip" data-cat="${c.id}">${ICONS[c.nombre] || "•"} ${U.escape(c.nombre)}</div>`).join("")}
           </div>
           <div class="pos-results" id="pos-results"></div>
         </div>
 
-        <!-- DERECHA: carrito + totales -->
+        <!-- DERECHA -->
         <div class="pos-right">
           <div class="pos-cart-head">
-            <div>
-              <strong>Carrito</strong>
-              <div class="muted" style="font-size:11px"><span id="pos-cart-count">0</span> producto(s)</div>
-            </div>
-            <button class="btn btn-sm btn-ghost" id="pos-clear" title="F9">Limpiar (F9)</button>
+            <h3>Pedido <span class="count" id="pos-cart-count">0</span></h3>
+            <button class="clear" id="pos-clear">Vaciar</button>
           </div>
           <div class="pos-cart" id="pos-cart"></div>
-          <div class="pos-totals">
+          <div class="pos-bottom">
             <div class="line"><span>Subtotal</span><span id="pos-subtotal">${U.money(0)}</span></div>
-            <div class="line"><span>Descuento</span><span><input id="pos-desc" type="number" min="0" value="0" style="width:90px;text-align:right;border:1px solid var(--border);border-radius:4px;padding:2px 6px"></span></div>
-            <div class="line total"><span>TOTAL</span><span id="pos-total">${U.money(0)}</span></div>
-          </div>
-          <div class="pos-actions">
-            <button class="btn-cobrar" id="pos-pay">COBRAR <kbd>F12</kbd></button>
-            <div class="pos-quick-actions">
-              <select class="sel" id="pos-cliente">
-                <option value="">Cliente: Mostrador</option>
-                ${clientes.map(c => `<option value="${c.id}">${U.escape(c.nombre)}</option>`).join("")}
+            <div class="line">
+              <span>Descuento</span>
+              <input id="pos-desc" type="number" min="0" value="0" placeholder="0">
+            </div>
+            <div class="total">
+              <span>Total a pagar</span>
+              <span class="value" id="pos-total">${U.money(0)}</span>
+            </div>
+            <div class="selectors">
+              <select id="pos-cliente">
+                <option value="">👤 Mostrador</option>
+                ${clientes.map(c => `<option value="${c.id}">👤 ${U.escape(c.nombre)}</option>`).join("")}
               </select>
-              <select class="sel" id="pos-vendedor">
-                ${DB.list("usuarios", { activo: true }).map(u => `<option value="${u.id}" ${u.id === Auth.currentUser().id ? "selected" : ""}>👤 ${U.escape(u.username)}</option>`).join("")}
+              <select id="pos-vendedor">
+                ${DB.list("usuarios", { activo: true }).map(u => `<option value="${u.id}" ${u.id === Auth.currentUser().id ? "selected" : ""}>${U.escape(u.username)}</option>`).join("")}
               </select>
             </div>
-            <div class="muted" style="font-size:11px;text-align:center;padding:4px">
-              <kbd class="hint">F2</kbd> buscar · <kbd class="hint">↑↓</kbd> navegar · <kbd class="hint">Enter</kbd> agregar · <kbd class="hint">F9</kbd> limpiar · <kbd class="hint">F12</kbd> cobrar
+            <button class="btn-cobrar" id="pos-pay" disabled>
+              Cobrar <kbd>F12</kbd>
+            </button>
+            <div class="pos-shortcuts">
+              <kbd class="hint">F2</kbd> buscar
+              · <kbd class="hint">↑↓</kbd> navegar
+              · <kbd class="hint">Enter</kbd> agregar
+              · <kbd class="hint">F9</kbd> vaciar
             </div>
           </div>
         </div>
@@ -66,34 +83,40 @@ Router.register("/pos", async (host) => {
     const inp = host.querySelector("#pos-search-inp");
     const results = host.querySelector("#pos-results");
 
-    function showResults(query = "") {
-      const q = query.trim().toLowerCase();
+    function showResults() {
+      const q = inp.value.trim().toLowerCase();
       let rows = productos;
-      if (q) {
-        rows = productos.filter(p =>
-          (p.nombre || "").toLowerCase().includes(q) ||
-          (p.sku || "").toLowerCase().includes(q)
-        );
-      }
-      rows = rows.slice(0, 50);
+      if (activeCat) rows = rows.filter(p => String(p.categoria_id) === String(activeCat));
+      if (q) rows = rows.filter(p =>
+        (p.nombre || "").toLowerCase().includes(q) ||
+        (p.sku || "").toLowerCase().includes(q)
+      );
+      rows = rows.slice(0, 60);
       lastResults = rows;
       resultsFocus = 0;
       if (!rows.length) {
-        results.innerHTML = `<div class="pos-cart-empty">Sin resultados para "${U.escape(query)}"</div>`;
+        results.innerHTML = `<div class="pos-empty">
+          <div style="font-size:36px;opacity:.4;margin-bottom:8px">🔍</div>
+          <div>Sin resultados${q ? ` para "${U.escape(q)}"` : ""}</div>
+        </div>`;
         return;
       }
       results.innerHTML = rows.map((p, i) => {
         const stock = DB.stockOf(p.id);
+        let badgeCls = "", badgeTxt = "";
+        if (stock <= 0) { badgeCls = "zero"; badgeTxt = "Sin stock"; }
+        else if (stock < U.num(p.stock_minimo)) { badgeCls = "low"; badgeTxt = `${stock}`; }
+        else { badgeTxt = `${stock}`; }
+        const icon = productIcon(p);
         return `
           <div class="pos-card ${stock <= 0 ? "no-stock" : ""} ${i === 0 ? "focused" : ""}" data-id="${p.id}" data-i="${i}">
-            <div>
-              <div class="sku">${U.escape(p.sku)} ${stock <= 0 ? "· SIN STOCK" : ""}</div>
-              <div class="name">${U.escape(p.nombre)}</div>
+            <div class="pos-card-thumb">
+              ${icon}
+              <span class="stock-badge ${badgeCls}">${badgeTxt}</span>
             </div>
-            <div style="text-align:right">
-              <div class="price">${U.money(p.precio_venta)}</div>
-              <div class="stock">Stock: ${stock}</div>
-            </div>
+            <div class="sku">${U.escape(p.sku)}</div>
+            <div class="name">${U.escape(p.nombre)}</div>
+            <div class="price">${U.money(p.precio_venta)}</div>
           </div>
         `;
       }).join("");
@@ -111,51 +134,59 @@ Router.register("/pos", async (host) => {
       cards[resultsFocus]?.scrollIntoView({ block: "nearest" });
     }
 
-    function addToCart(productoId, qty = 1) {
+    function addToCart(productoId) {
       const p = DB.get("productos", productoId);
       if (!p) return;
       const stock = DB.stockOf(productoId);
       if (stock <= 0) { U.toast("Sin stock disponible", "danger"); return; }
       const existing = cart.find(x => x.producto_id === productoId);
       if (existing) {
-        if (existing.cantidad + qty > stock) { U.toast(`Stock máximo: ${stock}`, "warning"); return; }
-        existing.cantidad += qty;
+        if (existing.cantidad + 1 > stock) { U.toast(`Stock máximo: ${stock}`, "warning"); return; }
+        existing.cantidad++;
       } else {
         cart.push({
           producto_id: productoId,
           nombre: p.nombre, sku: p.sku,
           precio: U.num(p.precio_venta),
           costo: DB.avgCostOf(productoId),
-          cantidad: qty,
-          stock
+          cantidad: 1, stock,
+          icon: productIcon(p)
         });
       }
       renderCart();
-      // limpiar buscador y enfocar
       inp.value = "";
-      showResults("");
+      showResults();
       inp.focus();
     }
 
     function renderCart() {
       const cartEl = host.querySelector("#pos-cart");
+      const payBtn = host.querySelector("#pos-pay");
       if (!cart.length) {
-        cartEl.innerHTML = `<div class="pos-cart-empty">El carrito está vacío.<br><br><small>Busca un producto y presiona <kbd class="hint">Enter</kbd> para agregarlo.</small></div>`;
+        cartEl.innerHTML = `<div class="pos-cart-empty">
+          <div class="icon">🛍️</div>
+          <div style="font-weight:600;color:var(--text)">El pedido está vacío</div>
+          <div style="font-size:12px;margin-top:6px">Busca un producto y haz clic para agregarlo</div>
+        </div>`;
+        payBtn.disabled = true;
       } else {
         cartEl.innerHTML = cart.map((it, idx) => `
           <div class="pos-cart-item">
+            <div class="ci-thumb">${it.icon}</div>
             <div>
-              <div class="row1">
-                <span class="name">${U.escape(it.nombre)}</span>
-                <span><strong>${U.money(it.precio * it.cantidad)}</strong></span>
+              <div class="ci-name">${U.escape(it.nombre)}</div>
+              <div class="ci-meta">
+                <span class="qty-ctrl">
+                  <button data-act="dec" data-i="${idx}">−</button>
+                  <span class="q">${it.cantidad}</span>
+                  <button data-act="inc" data-i="${idx}">+</button>
+                </span>
+                <span>×&nbsp;${U.money(it.precio)}</span>
               </div>
-              <div class="ctrl">
-                <button data-act="dec" data-i="${idx}">−</button>
-                <span class="qty">${it.cantidad}</span>
-                <button data-act="inc" data-i="${idx}">+</button>
-                <span class="sub" style="margin-left:8px">@ ${U.money(it.precio)}</span>
-                <button data-act="del" data-i="${idx}" style="margin-left:auto;color:var(--danger);border-color:var(--danger)">✕</button>
-              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <div class="ci-sub">${U.money(it.precio * it.cantidad)}</div>
+              <button class="ci-del" data-act="del" data-i="${idx}" title="Eliminar">✕</button>
             </div>
           </div>
         `).join("");
@@ -173,8 +204,8 @@ Router.register("/pos", async (host) => {
           }
           renderCart();
         }));
+        payBtn.disabled = false;
       }
-      // totales
       const sub = cart.reduce((a, b) => a + b.precio * b.cantidad, 0);
       const desc = U.num(host.querySelector("#pos-desc").value);
       const total = Math.max(0, sub - desc);
@@ -188,11 +219,10 @@ Router.register("/pos", async (host) => {
       cart.length = 0;
       renderCart();
       inp.focus();
-      U.toast("Carrito vaciado", "warning");
     }
 
-    // Eventos buscador
-    inp.addEventListener("input", e => showResults(e.target.value));
+    // Eventos
+    inp.addEventListener("input", showResults);
     inp.addEventListener("keydown", e => {
       if (e.key === "ArrowDown") { e.preventDefault(); moveFocus(1); }
       else if (e.key === "ArrowUp") { e.preventDefault(); moveFocus(-1); }
@@ -202,17 +232,21 @@ Router.register("/pos", async (host) => {
         if (card) addToCart(Number(card.dataset.id));
       }
     });
-
+    host.querySelectorAll(".pos-cat-chip").forEach(c => c.addEventListener("click", () => {
+      host.querySelectorAll(".pos-cat-chip").forEach(x => x.classList.remove("active"));
+      c.classList.add("active");
+      activeCat = c.dataset.cat || null;
+      showResults();
+    }));
     host.querySelector("#pos-desc").addEventListener("input", renderCart);
     host.querySelector("#pos-clear").addEventListener("click", clearCart);
     host.querySelector("#pos-pay").addEventListener("click", openCobro);
 
-    // mostrar todos los productos al inicio
-    showResults("");
+    showResults();
     renderCart();
     inp.focus();
 
-    // Atajos globales
+    // Atajos
     function onKey(e) {
       if (e.key === "F2") { e.preventDefault(); inp.focus(); inp.select(); }
       else if (e.key === "F9") { e.preventDefault(); clearCart(); }
@@ -229,49 +263,62 @@ Router.register("/pos", async (host) => {
       const clienteId = U.num(host.querySelector("#pos-cliente").value);
       const vendedorId = U.num(host.querySelector("#pos-vendedor").value) || Auth.currentUser().id;
 
+      // botones de método de pago
+      const methodIcons = { efectivo: "💵", transferencia: "🏦", tarjeta: "💳", credito: "📝", otro: "•" };
+
+      // sugerencias de billetes
+      const sugerencias = [...new Set([
+        total,
+        Math.ceil(total / 1000) * 1000,
+        Math.ceil(total / 5000) * 5000,
+        Math.ceil(total / 10000) * 10000,
+        Math.ceil(total / 20000) * 20000,
+        Math.ceil(total / 50000) * 50000,
+        Math.ceil(total / 100000) * 100000
+      ].filter(v => v >= total))].slice(0, 8);
+
       const div = document.createElement("div");
       div.innerHTML = `
         <div class="modal-backdrop" id="mdl-cobro">
           <form class="modal cobro-modal" id="frm-cobro">
-            <h3>💰 Cobrar venta</h3>
-
-            <div class="cobro-total">${U.money(total)}</div>
-
-            <label class="lbl">Método de pago
-              <select class="sel" name="metodo_pago_id" id="cobro-mp">
-                ${metodos.map(m => `<option value="${m.id}">${U.escape(m.nombre)}</option>`).join("")}
-              </select>
-            </label>
-
-            <div id="cobro-efectivo-block">
-              <div class="cobro-quickcash" id="cobro-quick">
-                ${[total, 10000, 20000, 50000, 100000, Math.ceil(total/10000)*10000, Math.ceil(total/50000)*50000].filter((v,i,a) => v >= total && a.indexOf(v) === i).slice(0,8).map(v => `<button type="button" data-cash="${v}">${U.money(v)}</button>`).join("")}
-              </div>
-              <div class="cobro-cash-row">
-                <div class="cobro-cash recibido">
-                  <div class="label">Billete recibido</div>
-                  <input type="number" name="recibido" id="cobro-recibido" min="0" step="0.01" autofocus>
-                </div>
-                <div class="cobro-cash cambio">
-                  <div class="label">Cambio</div>
-                  <div class="value" id="cobro-cambio">${U.money(0)}</div>
-                </div>
-              </div>
+            <h3>Cobrar</h3>
+            <div class="cobro-total">
+              <div class="label">Total a pagar</div>
+              <div class="amount">${U.money(total)}</div>
             </div>
+            <div class="cobro-body">
+              <div class="cobro-method" id="cobro-method">
+                ${metodos.map((m, i) => `
+                  <button type="button" data-mp="${m.id}" data-tipo="${m.tipo}" class="${i === 0 ? "active" : ""}">
+                    <span class="ico">${methodIcons[m.tipo] || "•"}</span>
+                    <span>${U.escape(m.nombre)}</span>
+                  </button>
+                `).join("")}
+              </div>
 
-            <label class="lbl">Caja
-              <select class="sel" name="caja_id">
-                ${cajas.map(c => `<option value="${c.id}">${U.escape(c.nombre)}</option>`).join("")}
+              <div id="cobro-efectivo-block">
+                <div class="cobro-quickcash">
+                  ${sugerencias.map(v => `<button type="button" data-cash="${v}">${U.money(v)}</button>`).join("")}
+                </div>
+                <div class="cobro-cash-row">
+                  <div class="cobro-cash recibido">
+                    <div class="label">Recibido</div>
+                    <input type="number" id="cobro-recibido" min="0" step="0.01" inputmode="decimal">
+                  </div>
+                  <div class="cobro-cash">
+                    <div class="label">Cambio</div>
+                    <div class="value zero" id="cobro-cambio">${U.money(0)}</div>
+                  </div>
+                </div>
+              </div>
+
+              <select class="sel" id="cobro-caja" style="margin-top:8px">
+                ${cajas.map(c => `<option value="${c.id}">📦 ${U.escape(c.nombre)}</option>`).join("")}
               </select>
-            </label>
-
-            <div class="muted" style="font-size:12px;text-align:center;margin-top:8px">
-              <kbd class="hint">Enter</kbd> confirmar · <kbd class="hint">Esc</kbd> cancelar
             </div>
-
             <div class="modal-actions">
-              <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
-              <button type="submit" class="btn btn-primary" style="background:var(--accent);color:#1a1a1a;font-weight:700">Confirmar venta</button>
+              <button type="button" class="btn btn-ghost" data-close>Cancelar (Esc)</button>
+              <button type="submit" class="btn btn-primary">Confirmar venta · ${U.money(total)}</button>
             </div>
           </form>
         </div>
@@ -281,86 +328,70 @@ Router.register("/pos", async (host) => {
       const recInp = mdl.querySelector("#cobro-recibido");
       const cambioEl = mdl.querySelector("#cobro-cambio");
       const efBlock = mdl.querySelector("#cobro-efectivo-block");
-      const mpSel = mdl.querySelector("#cobro-mp");
+      let selectedMP = metodos[0];
+      let selectedTipo = metodos[0]?.tipo;
 
       function recalcCambio() {
         const r = U.num(recInp.value);
         const c = r - total;
         cambioEl.textContent = U.money(c);
-        cambioEl.classList.toggle("negative", c < 0);
+        cambioEl.classList.remove("negative", "zero");
+        if (c < 0) cambioEl.classList.add("negative");
+        else if (c === 0) cambioEl.classList.add("zero");
       }
       recInp.addEventListener("input", recalcCambio);
-
-      // botones de billetes rápidos
       mdl.querySelectorAll("[data-cash]").forEach(b => b.addEventListener("click", () => {
         recInp.value = b.dataset.cash;
         recalcCambio();
         recInp.focus();
       }));
+      mdl.querySelectorAll("#cobro-method button").forEach(b => b.addEventListener("click", () => {
+        mdl.querySelectorAll("#cobro-method button").forEach(x => x.classList.remove("active"));
+        b.classList.add("active");
+        selectedMP = metodos.find(m => m.id === Number(b.dataset.mp));
+        selectedTipo = b.dataset.tipo;
+        efBlock.style.display = selectedTipo === "efectivo" ? "block" : "none";
+      }));
 
-      // si el método de pago no es efectivo, ocultar el bloque de cambio
-      mpSel.addEventListener("change", () => {
-        const m = metodos.find(x => x.id === Number(mpSel.value));
-        if (m && m.tipo !== "efectivo") {
-          efBlock.style.display = "none";
-          recInp.removeAttribute("required");
-        } else {
-          efBlock.style.display = "block";
-        }
-      });
-
-      // valor inicial = exacto
       recInp.value = total;
       recalcCambio();
       setTimeout(() => { recInp.focus(); recInp.select(); }, 50);
 
       function close() { mdl.remove(); document.removeEventListener("keydown", onCobroKey); }
-
-      function onCobroKey(e) {
-        if (e.key === "Escape") { e.preventDefault(); close(); }
-      }
+      function onCobroKey(e) { if (e.key === "Escape") { e.preventDefault(); close(); } }
       document.addEventListener("keydown", onCobroKey);
-
       mdl.addEventListener("click", e => { if (e.target.dataset.close !== undefined || e.target === mdl) close(); });
 
       mdl.querySelector("#frm-cobro").addEventListener("submit", e => {
         e.preventDefault();
-        const data = U.formData(e.target);
-        const mp = metodos.find(x => x.id === Number(data.metodo_pago_id));
-        const recibido = U.num(data.recibido);
-        if (mp && mp.tipo === "efectivo" && recibido < total) {
-          return U.toast("El billete recibido es menor al total", "danger");
+        const recibido = U.num(recInp.value);
+        if (selectedTipo === "efectivo" && recibido < total) {
+          return U.toast("El monto recibido es menor al total", "danger");
         }
-        // validar stock una vez más
         for (const it of cart) {
           if (it.cantidad > DB.stockOf(it.producto_id)) {
             return U.toast(`Sin stock suficiente de ${it.nombre}`, "danger");
           }
         }
+        const cajaId = U.num(mdl.querySelector("#cobro-caja").value);
 
         const venta = DB.insert("ventas", {
           numero: "V-" + Date.now().toString(36).toUpperCase(),
-          cliente_id: clienteId,
-          vendedor_id: vendedorId,
+          cliente_id: clienteId, vendedor_id: vendedorId,
           fecha: U.nowISO(),
-          metodo_pago_id: U.num(data.metodo_pago_id),
-          caja_id: U.num(data.caja_id),
-          subtotal: sub,
-          descuento: desc,
-          total,
+          metodo_pago_id: selectedMP.id, caja_id: cajaId,
+          subtotal: sub, descuento: desc, total,
           costo_total: cart.reduce((a, b) => a + b.costo * b.cantidad, 0),
           utilidad: total - cart.reduce((a, b) => a + b.costo * b.cantidad, 0),
           estado: "pagada",
-          observaciones: mp?.tipo === "efectivo" ? `Recibido: ${U.money(recibido)} · Cambio: ${U.money(recibido - total)}` : ""
+          observaciones: selectedTipo === "efectivo" ? `Recibido ${U.money(recibido)} · Cambio ${U.money(recibido - total)}` : ""
         });
-
         cart.forEach(it => {
           DB.insert("ventas_detalle", {
             venta_id: venta.id, producto_id: it.producto_id,
             cantidad: it.cantidad, precio_unitario: it.precio, descuento: 0,
             subtotal: it.precio * it.cantidad,
-            costo_unitario: it.costo,
-            utilidad: it.cantidad * (it.precio - it.costo)
+            costo_unitario: it.costo, utilidad: it.cantidad * (it.precio - it.costo)
           });
           DB.pushInvMovement({
             producto_id: it.producto_id, tipo: "salida",
@@ -369,18 +400,17 @@ Router.register("/pos", async (host) => {
             motivo: "POS " + venta.numero
           });
         });
-
         DB.pushCajaMov({
-          caja_id: U.num(data.caja_id), fecha: venta.fecha,
+          caja_id: cajaId, fecha: venta.fecha,
           tipo: "ingreso", concepto: "Venta POS " + venta.numero,
           referencia_tipo: "venta", referencia_id: venta.id,
-          metodo_pago_id: U.num(data.metodo_pago_id), monto: total
+          metodo_pago_id: selectedMP.id, monto: total
         });
 
         close();
         cart.length = 0;
         renderCart();
-        showReceipt(venta.id, recibido, mp?.tipo === "efectivo");
+        showReceipt(venta.id, recibido, selectedTipo === "efectivo");
         U.toast(`Venta ${venta.numero} · ${U.money(total)}`, "success");
       });
     }
@@ -391,42 +421,41 @@ Router.register("/pos", async (host) => {
     const det = DB.list("ventas_detalle", { venta_id: ventaId });
     const cliente = DB.get("clientes", v.cliente_id);
     const empresa = DB.list("config").find(c => c.clave === "empresa_nombre")?.valor || "KAM Papelería";
-
     const cambio = (recibido || 0) - v.total;
+
     const div = document.createElement("div");
     div.innerHTML = `
       <div class="modal-backdrop" id="mdl-rec">
-        <div class="modal" style="max-width:380px;font-family:monospace">
-          <div style="text-align:center">
-            <img src="assets/logo.svg" style="width:120px"><br>
-            <div style="margin:4px 0"><strong>${U.escape(empresa)}</strong></div>
-            <div style="font-size:12px;color:var(--text-muted)">Recibo de venta</div>
-            <hr>
-            <div><strong>${U.escape(v.numero)}</strong></div>
-            <div style="font-size:12px">${U.fmtDate(v.fecha)}</div>
-            <div style="font-size:12px">Cliente: ${U.escape(cliente?.nombre || "Mostrador")}</div>
-            <hr>
+        <div class="modal" style="max-width:380px">
+          <div style="text-align:center;padding-bottom:8px">
+            <img src="assets/logo.svg" style="width:140px;margin:0 auto;display:block"><br>
+            <div style="font-size:11px;color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase;margin-top:-8px">Recibo de venta</div>
+            <hr style="margin:14px 0;border:none;border-top:1px dashed var(--border)">
+            <div style="font-weight:700">${U.escape(v.numero)}</div>
+            <div style="font-size:12px;color:var(--text-muted)">${U.fmtDate(v.fecha)}</div>
+            <div style="font-size:12px;color:var(--text-muted)">Cliente: ${U.escape(cliente?.nombre || "Mostrador")}</div>
           </div>
+          <hr style="margin:12px 0;border:none;border-top:1px dashed var(--border)">
           <table style="width:100%;font-size:12px">
             ${det.map(d => {
               const p = DB.get("productos", d.producto_id);
               return `<tr>
-                <td>${d.cantidad} × ${U.escape(p?.nombre || "")}</td>
+                <td>${d.cantidad}× ${U.escape(p?.nombre || "")}</td>
                 <td style="text-align:right">${U.money(d.subtotal)}</td>
               </tr>`;
             }).join("")}
           </table>
-          <hr>
+          <hr style="margin:12px 0;border:none;border-top:1px dashed var(--border)">
           <div style="font-size:13px">
             <div class="flex between"><span>Subtotal</span><span>${U.money(v.subtotal)}</span></div>
             ${v.descuento ? `<div class="flex between"><span>Descuento</span><span>-${U.money(v.descuento)}</span></div>` : ""}
-            <div class="flex between" style="font-size:18px;font-weight:700;padding-top:4px"><span>TOTAL</span><span>${U.money(v.total)}</span></div>
+            <div class="flex between" style="font-size:20px;font-weight:800;padding-top:8px;margin-top:4px;border-top:2px solid var(--text)"><span>TOTAL</span><span>${U.money(v.total)}</span></div>
             ${esEfectivo ? `
-              <div class="flex between" style="margin-top:8px"><span>Recibido</span><span>${U.money(recibido)}</span></div>
-              <div class="flex between" style="font-weight:700;color:var(--success)"><span>Cambio</span><span>${U.money(cambio)}</span></div>
+              <div class="flex between" style="margin-top:10px;font-size:12px;color:var(--text-muted)"><span>Recibido</span><span>${U.money(recibido)}</span></div>
+              <div class="flex between" style="font-weight:700;color:var(--success);font-size:14px"><span>Cambio</span><span>${U.money(cambio)}</span></div>
             ` : ""}
           </div>
-          <hr>
+          <hr style="margin:14px 0 8px;border:none;border-top:1px dashed var(--border)">
           <div style="text-align:center;font-size:11px;color:var(--text-muted)">¡Gracias por tu compra!</div>
           <div class="modal-actions">
             <button class="btn btn-ghost" data-close>Cerrar (Enter)</button>
@@ -444,7 +473,6 @@ Router.register("/pos", async (host) => {
     mdl.querySelector("#rec-print").addEventListener("click", () => U.exportPDF(`Recibo ${v.numero}`, mdl.querySelector(".modal").innerHTML));
   }
 
-  // Limpiar handler global al salir de la ruta
   window.addEventListener("hashchange", () => { if (host._posCleanup) host._posCleanup(); }, { once: true });
 
   render();
