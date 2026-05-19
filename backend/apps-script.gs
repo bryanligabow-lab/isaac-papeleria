@@ -156,22 +156,32 @@ function sha256_(text) {
 
 // ============= Web endpoints =============
 function doGet(e) {
-  return HtmlService.createHtmlOutput("<h2>Isaac Papelería API</h2><p>OK</p>");
+  // Permitir también GET con action para tests rápidos sin CORS
+  const action = (e && e.parameter && e.parameter.action) || "";
+  if (action === "ping") return ok_({ pong: true, time: new Date().toISOString() });
+  if (action === "list" && e.parameter.table) return ok_(readAll_(e.parameter.table));
+  return ContentService.createTextOutput(JSON.stringify({ ok: true, message: "KAM Papelería API", time: new Date().toISOString() }))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 function doPost(e) {
   try {
+    e = e || {};
     const action = (e.parameter && e.parameter.action) || "";
     let body = {};
-    try { body = JSON.parse(e.postData?.contents || "{}"); } catch (er) {}
+    try {
+      const raw = (e.postData && e.postData.contents) || "{}";
+      body = JSON.parse(raw);
+    } catch (er) { body = {}; }
 
     // Webhook Telegram (Telegram envía como POST sin action)
     if (!action && body.update_id) return handleTelegram_(body);
 
     switch (action) {
+      case "ping": return ok_({ pong: true, time: new Date().toISOString() });
       case "login": return ok_(login_(body));
       case "list": return ok_(readAll_(body.table));
-      case "get": return ok_((readAll_(body.table) || []).find(r => String(r.id) === String(body.id)));
+      case "get": return ok_((readAll_(body.table) || []).find(function(r) { return String(r.id) === String(body.id); }));
       case "create": return ok_(appendRow_(body.table, body.row));
       case "update": return ok_(updateRow_(body.table, body.id, body.patch));
       case "void": return ok_(voidRow_(body.table, body.id, body.motivo, body.userId));
@@ -180,12 +190,14 @@ function doPost(e) {
       case "createEgreso": return ok_(createEgreso_(body));
       case "openCashbox": return ok_(openCashbox_(body));
       case "closeCashbox": return ok_(closeCashbox_(body));
-      case "kardex": return ok_(readAll_("inventario_movimientos").filter(m => String(m.producto_id) === String(body.producto_id)));
+      case "kardex": return ok_(readAll_("inventario_movimientos").filter(function(m) { return String(m.producto_id) === String(body.producto_id); }));
       case "report": return ok_(report_(body));
       case "telegramWebhook": return handleTelegram_(body);
       default: return err_("Acción no válida: " + action);
     }
-  } catch (ex) { return err_(ex.message || ex); }
+  } catch (ex) {
+    return err_((ex && ex.message) || ex || "Error desconocido");
+  }
 }
 
 // ============= Auth =============

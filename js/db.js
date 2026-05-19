@@ -554,11 +554,15 @@ const DB = (() => {
   async function pingServer() {
     if (!isOnline()) { STATUS.online = false; broadcastStatus(); return false; }
     try {
-      await remote("list", { table: "config" });
-      STATUS.online = true;
+      // Usar GET (no necesita CORS preflight ni body)
+      const res = await fetch(APP_CONFIG.apiUrl + "?action=ping", { method: "GET" });
+      const data = await res.json();
+      const ok = !!data && data.ok !== false;
+      STATUS.online = ok;
       broadcastStatus();
-      return true;
+      return ok;
     } catch (e) {
+      console.warn("Ping fallido:", e.message);
       STATUS.online = false;
       broadcastStatus();
       return false;
