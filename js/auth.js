@@ -24,40 +24,52 @@ const Auth = (() => {
   async function login(username, password, remember = true) {
     // Modo producción: autenticar contra Google Sheets (Apps Script)
     if (APP_CONFIG.mode === "production" && APP_CONFIG.apiUrl) {
+      // 1. Descargar usuarios del servidor primero (GET, confiable)
+      let serverUsers;
       try {
-        const res = await fetch(APP_CONFIG.apiUrl + "?action=login", {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ username, password })
-        });
+        const url = APP_CONFIG.apiUrl + "?action=list&table=usuarios";
+        const res = await fetch(url, { method: "GET" });
         const text = await res.text();
         let data;
         try { data = JSON.parse(text); }
-        catch (e) { throw new Error("Respuesta no válida del servidor"); }
-        if (!data.ok) throw new Error(data.error || "Error de login");
-        const remoteUser = data.data.user;
-        const remoteToken = data.data.token;
-        session = { token: remoteToken, user: remoteUser };
-        saveSession(remember);
-        // Sincronizar datos del servidor a local tras el login
-        try { await DB.syncDownAll(); } catch (e) { console.warn("Sync inicial fallida:", e.message); }
-        // Asegurar que el usuario quede en la cache local
-        const dbAfter = DB.getDB();
-        if (!dbAfter.usuarios.find(u => Number(u.id) === Number(remoteUser.id))) {
-          dbAfter.usuarios.push(remoteUser);
-          DB.setDB(dbAfter);
+        catch (e) {
+          if (text.includes("SPREADSHEET_ID")) {
+            throw new Error("El servidor no está configurado. Falta SPREADSHEET_ID en Apps Script.");
+          }
+          throw new Error("El servidor no devolvió una respuesta válida");
         }
-        DB.audit("auth", "login", remoteUser.id, { username, modo: "remoto" });
-        return remoteUser;
+        if (!data.ok) throw new Error(data.error || "Error consultando usuarios");
+        serverUsers = data.data || [];
       } catch (e) {
-        // Si el error es de configuración del servidor, mostrarlo claro
-        if (/SPREADSHEET_ID/i.test(e.message)) {
-          throw new Error("El servidor no está configurado. Falta SPREADSHEET_ID en Apps Script.");
-        }
-        // Cualquier otro error de red → intentar fallback local sólo para admin original
-        console.warn("Login remoto falló:", e.message);
-        throw new Error(e.message || "No se pudo conectar al servidor");
+        if (/SPREADSHEET_ID/i.test(e.message)) throw e;
+        throw new Error("No se pudo conectar al servidor: " + e.message);
       }
+
+      // 2. Buscar usuario y validar contraseña localmente (evita problemas de POST/redirect)
+      const u = serverUsers.find(x => x.username === username && (x.activo === true || x.activo === "true" || x.activo === "TRUE" || x.activo === 1));
+      if (!u) throw new Error("Usuario no encontrado en el servidor");
+      const hash = await U.sha256(password + u.salt);
+      if (hash !== u.password_hash) throw new Error("Contraseña incorrecta");
+
+      // 3. Crear sesión local
+      session = { token: U.uid(), user: u };
+      saveSession(remember);
+
+      // 4. Sincronizar TODOS los datos del servidor a local
+      try {
+        await DB.syncDownAll();
+      } catch (e) {
+        console.warn("Sync inicial fallida:", e.message);
+        U.toast("Login OK, pero sync de datos parcial. Pulsa 🔄 para reintentar.", "warning", 5000);
+      }
+      // Asegurar que el usuario quede en la cache local
+      const dbAfter = DB.getDB();
+      if (!dbAfter.usuarios.find(uu => Number(uu.id) === Number(u.id))) {
+        dbAfter.usuarios.push(u);
+        DB.setDB(dbAfter);
+      }
+      DB.audit("auth", "login", u.id, { username, modo: "remoto" });
+      return u;
     }
 
     // Modo demo: autenticar contra localStorage

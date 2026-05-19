@@ -558,21 +558,38 @@ const DB = (() => {
     return { total, done, errors };
   }
 
+  // GET list — más confiable que POST (sin problemas de redirect/CORS)
+  async function listRemote(table) {
+    const url = APP_CONFIG.apiUrl + "?action=list&table=" + encodeURIComponent(table);
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 20000);
+    try {
+      const res = await fetch(url, { method: "GET", signal: ctrl.signal });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); }
+      catch (e) { throw new Error("Respuesta no JSON: " + text.slice(0, 100)); }
+      if (!data.ok) throw new Error(data.error || "Error remoto");
+      return data.data || [];
+    } finally { clearTimeout(tid); }
+  }
+
   async function syncDownAll(onProgress) {
     if (!isOnline()) throw new Error("Modo demo, configura la URL primero");
     const db = getDB();
-    let done = 0;
+    let done = 0, errors = 0;
     for (const table of TABLES) {
       try {
-        const rows = await remote("list", { table });
-        db[table] = rows || [];
+        const rows = await listRemote(table);
+        db[table] = Array.isArray(rows) ? rows : [];
       } catch (e) {
         console.warn("syncDown " + table + ":", e.message);
+        errors++;
       }
       done++;
-      onProgress?.(done, TABLES.length, table);
+      onProgress?.(done, TABLES.length, table, errors);
+      await _sleep(50);
     }
-    // recalcular secuencias para que nuevos inserts no choquen
     db._seq = db._seq || {};
     TABLES.forEach(t => {
       const ids = (db[t] || []).map(r => Number(r.id) || 0);
@@ -580,8 +597,11 @@ const DB = (() => {
     });
     setDB(db);
     STATUS.lastSync = Date.now();
-    STATUS.online = true;
+    STATUS.online = errors === 0;
     broadcastStatus();
+    if (errors > TABLES.length / 2) {
+      throw new Error(`Sync con muchos errores (${errors} tablas fallaron)`);
+    }
   }
 
   async function pingServer() {
