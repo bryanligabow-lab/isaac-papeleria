@@ -1,4 +1,73 @@
 // Capa de base de datos. Modo demo (localStorage) o producción (Apps Script).
+
+// ============= Catálogo inicial KAM Papelería (Ecuador / USD) =============
+const KAM_CATEGORIAS = ["Útiles escolares", "Oficina", "Papelería", "Arte y manualidades"];
+
+const KAM_PRODUCTOS = [
+  { sku: "BOR001", nombre: "Borradores artesco", categoria: "Útiles escolares", costo: 0.13, precio: 0.50, stock: 20, min: 3 },
+  { sku: "CAR001", nombre: "Carpeta de colores con membrete creativ", categoria: "Oficina", costo: 0.34, precio: 1.00, stock: 12, min: 2 },
+  { sku: "CAR002", nombre: "Carpetas escribe tapa transparente", categoria: "Oficina", costo: 0.39, precio: 1.00, stock: 8, min: 2 },
+  { sku: "CRT001", nombre: "Cartulina lancer bristol A3 blanca", categoria: "Arte y manualidades", costo: 0.05, precio: 0.25, stock: 75, min: 11 },
+  { sku: "CRT002", nombre: "Cartulina lancer bristol A4 colores", categoria: "Arte y manualidades", costo: 0.03, precio: 0.15, stock: 75, min: 11 },
+  { sku: "CRT003", nombre: "Cartulina lancer de hilo A4", categoria: "Arte y manualidades", costo: 0.08, precio: 0.25, stock: 25, min: 3 },
+  { sku: "CRT004", nombre: "Cartulina lancer iris block A4 surtido", categoria: "Arte y manualidades", costo: 0.04, precio: 0.20, stock: 120, min: 18 },
+  { sku: "CRT005", nombre: "Cartulina lancer marfil blanca A4", categoria: "Arte y manualidades", costo: 0.03, precio: 0.20, stock: 75, min: 11 },
+  { sku: "CRT006", nombre: "Cartulina sucre A4 dibujo técnico", categoria: "Arte y manualidades", costo: 0.03, precio: 0.15, stock: 150, min: 22 },
+  { sku: "CIN001", nombre: "Cinta Scoth jeff 18 MMx36 yds", categoria: "Oficina", costo: 0.17, precio: 1.00, stock: 4, min: 2 },
+  { sku: "CMP001", nombre: "Compás lancer", categoria: "Útiles escolares", costo: 1.04, precio: 2.50, stock: 6, min: 2 },
+  { sku: "COR001", nombre: "Corrector Bester 7 ml", categoria: "Oficina", costo: 0.36, precio: 1.00, stock: 12, min: 2 },
+  { sku: "CRM001", nombre: "Cromos COPA MUNDIAL 2026", categoria: "Arte y manualidades", costo: 1.20, precio: 1.50, stock: 208, min: 31 },
+  { sku: "CUA001", nombre: "Cuaderno estilo 100 hojas", categoria: "Papelería", costo: 1.10, precio: 2.00, stock: 6, min: 2 },
+  { sku: "ESL001", nombre: "Escalímetro lancer 30 cm", categoria: "Útiles escolares", costo: 0.99, precio: 2.00, stock: 12, min: 2 },
+  { sku: "ESR001", nombre: "Escarcha creative", categoria: "Arte y manualidades", costo: 0.05, precio: 0.25, stock: 40, min: 6 },
+  { sku: "ESF001", nombre: "Esfero BIG BL/NG/RJ", categoria: "Útiles escolares", costo: 0.28, precio: 0.75, stock: 144, min: 21 },
+  { sku: "ESF002", nombre: "Esfero vanyla colores", categoria: "Útiles escolares", costo: 0.32, precio: 0.75, stock: 12, min: 2 },
+  { sku: "FOL001", nombre: "Folder cartón ideal surtida", categoria: "Oficina", costo: 0.20, precio: 0.50, stock: 20, min: 3 },
+  { sku: "FOL002", nombre: "Folder cartón sucre manila crema", categoria: "Oficina", costo: 0.07, precio: 0.25, stock: 10, min: 2 },
+  { sku: "FMX001", nombre: "Fómix arcoíris surtido lancer A4", categoria: "Arte y manualidades", costo: 0.24, precio: 0.75, stock: 10, min: 2 },
+  { sku: "FMX002", nombre: "Fómix creativ normal amarillo A4", categoria: "Arte y manualidades", costo: 0.05, precio: 0.25, stock: 10, min: 2 },
+  { sku: "FMX003", nombre: "Fómix creativ normal azul A4", categoria: "Arte y manualidades", costo: 0.05, precio: 0.25, stock: 10, min: 2 },
+  { sku: "FMX004", nombre: "Fómix creativ normal fucsia A4", categoria: "Arte y manualidades", costo: 0.05, precio: 0.25, stock: 10, min: 2 },
+  { sku: "FMX005", nombre: "Fómix creativ normal negro A4", categoria: "Arte y manualidades", costo: 0.05, precio: 0.25, stock: 10, min: 2 },
+  { sku: "FMX006", nombre: "Fómix láncer A4 toalla", categoria: "Arte y manualidades", costo: 0.11, precio: 0.40, stock: 30, min: 4 },
+  { sku: "FMX007", nombre: "Fómix lancer normal blanco A4", categoria: "Arte y manualidades", costo: 0.05, precio: 0.25, stock: 10, min: 2 },
+  { sku: "FMX008", nombre: "Fómix lancer normal rojo A4", categoria: "Arte y manualidades", costo: 0.05, precio: 0.25, stock: 10, min: 2 },
+  { sku: "FMX009", nombre: "Fómix lancer normal verde agua A4", categoria: "Arte y manualidades", costo: 0.05, precio: 0.25, stock: 10, min: 2 },
+  { sku: "FMX010", nombre: "Fómix passola escarchado A4 surtido", categoria: "Arte y manualidades", costo: 0.09, precio: 0.40, stock: 20, min: 3 },
+  { sku: "GLB001", nombre: "Globos surtidos sempertex N9", categoria: "Arte y manualidades", costo: 0.05, precio: 0.15, stock: 100, min: 15 },
+  { sku: "GOM001", nombre: "Goma passola barra 36 gr", categoria: "Oficina", costo: 0.29, precio: 1.00, stock: 12, min: 2 },
+  { sku: "GRD001", nombre: "Graduador jeff de círculos 12 cm", categoria: "Útiles escolares", costo: 0.19, precio: 0.75, stock: 12, min: 2 },
+  { sku: "HOJ001", nombre: "Hoja lancer milimetrada A4", categoria: "Papelería", costo: 0.01, precio: 0.10, stock: 150, min: 22 },
+  { sku: "HOJ002", nombre: "Hojas a cuadro ESCRIBE A4", categoria: "Papelería", costo: 0.38, precio: 1.00, stock: 10, min: 2 },
+  { sku: "HOJ003", nombre: "Hojas lancer ministro", categoria: "Papelería", costo: 0.03, precio: 0.20, stock: 80, min: 12 },
+  { sku: "JGM001", nombre: "Juego geométrico jeff flexible color 30 cm", categoria: "Útiles escolares", costo: 0.80, precio: 2.00, stock: 12, min: 2 },
+  { sku: "LAP001", nombre: "Lápiz passola grafito amarillo", categoria: "Útiles escolares", costo: 0.08, precio: 0.25, stock: 40, min: 6 },
+  { sku: "MAR001", nombre: "Marcador lancer disney avengers", categoria: "Útiles escolares", costo: 1.94, precio: 3.50, stock: 3, min: 2 },
+  { sku: "MAR002", nombre: "Marcador lancer disney moana", categoria: "Útiles escolares", costo: 1.94, precio: 3.50, stock: 3, min: 2 },
+  { sku: "NOT001", nombre: "Notitas adhesivas creativ colores", categoria: "Oficina", costo: 0.40, precio: 1.00, stock: 3, min: 2 },
+  { sku: "OJO001", nombre: "Ojos movibles estilo", categoria: "Arte y manualidades", costo: 0.01, precio: 0.10, stock: 60, min: 9 },
+  { sku: "PAP001", nombre: "Papel fotográfico", categoria: "Papelería", costo: 0.09, precio: 0.50, stock: 10, min: 2 },
+  { sku: "PAP002", nombre: "Papelógrafo de cuadros", categoria: "Arte y manualidades", costo: 0.09, precio: 0.50, stock: 50, min: 7 },
+  { sku: "PEL001", nombre: "Pelotas ping pong", categoria: "Arte y manualidades", costo: 0.16, precio: 0.50, stock: 18, min: 2 },
+  { sku: "REG001", nombre: "Regla nataraj 621 plástica 30cm", categoria: "Útiles escolares", costo: 0.31, precio: 0.75, stock: 10, min: 2 },
+  { sku: "SAC001", nombre: "Sacapunta passola 1 servicio", categoria: "Útiles escolares", costo: 0.08, precio: 0.25, stock: 20, min: 3 },
+  { sku: "SIL001", nombre: "Silicón líquido passola 60ml", categoria: "Oficina", costo: 0.34, precio: 1.00, stock: 6, min: 2 },
+  { sku: "STK001", nombre: "Sticker fómix aprendo letras grande", categoria: "Arte y manualidades", costo: 1.02, precio: 2.00, stock: 2, min: 2 },
+  { sku: "STK002", nombre: "Sticker fómix aprendo letras pequeño", categoria: "Arte y manualidades", costo: 0.68, precio: 1.50, stock: 2, min: 2 },
+  { sku: "STK003", nombre: "Sticker fómix lancer caritas", categoria: "Arte y manualidades", costo: 0.70, precio: 1.50, stock: 2, min: 2 },
+  { sku: "STK004", nombre: "Sticker fómix lancer caritas 3D", categoria: "Arte y manualidades", costo: 0.60, precio: 1.25, stock: 2, min: 2 },
+  { sku: "STK005", nombre: "Sticker fómix lancer corazones", categoria: "Arte y manualidades", costo: 0.68, precio: 1.25, stock: 2, min: 2 },
+  { sku: "STK006", nombre: "Sticker fómix lancer dinosaurios", categoria: "Arte y manualidades", costo: 0.60, precio: 1.25, stock: 2, min: 2 },
+  { sku: "STK007", nombre: "Sticker fómix lancer Fiesta 01", categoria: "Arte y manualidades", costo: 0.60, precio: 1.25, stock: 2, min: 2 },
+  { sku: "STK008", nombre: "Sticker fómix lancer Fiesta 02", categoria: "Arte y manualidades", costo: 0.60, precio: 1.25, stock: 2, min: 2 },
+  { sku: "STK009", nombre: "Sticker fómix lancer flores surtidas", categoria: "Arte y manualidades", costo: 0.64, precio: 1.50, stock: 2, min: 2 },
+  { sku: "STK010", nombre: "Sticker fómix lancer princesas", categoria: "Arte y manualidades", costo: 0.60, precio: 1.25, stock: 2, min: 2 },
+  { sku: "STK011", nombre: "Sticker perlas en botellas", categoria: "Arte y manualidades", costo: 0.35, precio: 1.00, stock: 2, min: 2 },
+  { sku: "TLA001", nombre: "Tela fieltro lancer A4 surtido", categoria: "Arte y manualidades", costo: 0.13, precio: 0.50, stock: 10, min: 2 },
+  { sku: "TMP001", nombre: "Témperas estilo kids", categoria: "Arte y manualidades", costo: 0.82, precio: 2.50, stock: 3, min: 2 },
+  { sku: "TIJ001", nombre: "Tijeras lancer escolares", categoria: "Útiles escolares", costo: 0.25, precio: 0.75, stock: 12, min: 2 }
+];
+
 const DB = (() => {
   const KEY = APP_CONFIG.storageKey;
 
@@ -47,7 +116,7 @@ const DB = (() => {
 
     // admin tiene todo
     d.permisos.forEach(p => d.roles_permisos.push({ rol_id: 1, permiso_id: p.id }));
-    // vendedor: ver dashboard, ver/crear ventas, ver caja, ver productos/clientes, crear cliente
+    // vendedor
     d.permisos.filter(p =>
       (p.modulo === "dashboard" && p.accion === "ver") ||
       (p.modulo === "ventas" && ["ver","crear","anular"].includes(p.accion)) ||
@@ -56,7 +125,7 @@ const DB = (() => {
       (p.modulo === "clientes" && ["ver","crear","editar"].includes(p.accion)) ||
       (p.modulo === "reportes" && p.accion === "ver")
     ).forEach(p => d.roles_permisos.push({ rol_id: 2, permiso_id: p.id }));
-    // bodega: ver dashboard, ver/crear inventario, ver productos, ver compras
+    // bodega
     d.permisos.filter(p =>
       (p.modulo === "dashboard" && p.accion === "ver") ||
       (p.modulo === "inventario") ||
@@ -69,7 +138,7 @@ const DB = (() => {
     const hash = await U.sha256("admin123" + salt);
     d.usuarios.push({
       id: 1, username: "admin", password_hash: hash, salt, nombre: "Administrador",
-      email: "admin@papeleria.local", rol_id: 1, telegram_id: "", activo: true,
+      email: "admin@kampapeleria.local", rol_id: 1, telegram_id: "", activo: true,
       created_at: U.nowISO()
     });
 
@@ -82,47 +151,95 @@ const DB = (() => {
     // caja principal
     d.cajas.push({ id: 1, nombre: "Caja Principal", activo: true });
 
-    // categorías ejemplo
-    ["Útiles escolares","Oficina","Arte","Tecnología","Otros"].forEach((n, i) => {
-      d.categorias.push({ id: i + 1, nombre: n, descripcion: "", activo: true });
-    });
+    // categorías + productos KAM
+    seedCatalog(d);
 
-    // productos ejemplo
+    // config — Ecuador / USD
     [
-      { sku: "LAP001", nombre: "Lapicero negro BIC", categoria_id: 1, precio_venta: 1500, costo_promedio: 800, stock_minimo: 20 },
-      { sku: "CUA001", nombre: "Cuaderno argollado 100h", categoria_id: 1, precio_venta: 9500, costo_promedio: 5500, stock_minimo: 10 },
-      { sku: "REG001", nombre: "Regla 30cm", categoria_id: 1, precio_venta: 2500, costo_promedio: 1200, stock_minimo: 15 },
-      { sku: "TIN001", nombre: "Tinta para impresora", categoria_id: 4, precio_venta: 35000, costo_promedio: 22000, stock_minimo: 5 }
-    ].forEach((p, i) => {
-      d.productos.push({
-        id: i + 1, ...p, unidad: "und",
-        activo: true, created_at: U.nowISO(), created_by: 1
-      });
-    });
-
-    // config
-    [
-      { clave: "empresa_nombre", valor: "Isaac Papelería", descripcion: "Nombre del negocio" },
-      { clave: "empresa_nit", valor: "", descripcion: "NIT / RUC" },
+      { clave: "empresa_nombre", valor: "KAM Papelería", descripcion: "Nombre del negocio" },
+      { clave: "empresa_ruc", valor: "", descripcion: "RUC / Cédula" },
       { clave: "empresa_direccion", valor: "", descripcion: "Dirección" },
       { clave: "empresa_telefono", valor: "", descripcion: "Teléfono" },
-      { clave: "iva_default", valor: "0.19", descripcion: "IVA por defecto" },
-      { clave: "moneda", valor: "$", descripcion: "Símbolo moneda" }
+      { clave: "empresa_ciudad", valor: "", descripcion: "Ciudad" },
+      { clave: "iva_default", valor: "0.15", descripcion: "IVA Ecuador (15%)" },
+      { clave: "moneda", valor: "$", descripcion: "Símbolo moneda (USD)" },
+      { clave: "moneda_codigo", valor: "USD", descripcion: "Código moneda" },
+      { clave: "pais", valor: "Ecuador", descripcion: "País" }
     ].forEach((c, i) => d.config.push({ id: i + 1, ...c }));
 
     // secuencias
     d._seq = {
       usuarios: 1, roles: 3, permisos: pid - 1, clientes: 0, proveedores: 0,
-      categorias: 5, productos: 4, metodos_pago: 4, cajas: 1,
+      categorias: KAM_CATEGORIAS.length, productos: KAM_PRODUCTOS.length,
+      metodos_pago: 4, cajas: 1,
       compras: 0, compras_detalle: 0, historial_costos: 0,
       ventas: 0, ventas_detalle: 0,
       caja_movimientos: 0, caja_sesiones: 0, comprobantes_egreso: 0,
-      inventario_movimientos: 0, ajustes_inventario: 0,
-      facturas_telegram: 0, telegram_logs: 0, config: 6, auditoria: 0
+      inventario_movimientos: KAM_PRODUCTOS.length, ajustes_inventario: 0,
+      facturas_telegram: 0, telegram_logs: 0, config: 9, auditoria: 0
     };
 
     save(d);
     return d;
+  }
+
+  // Carga categorías + productos KAM + entradas iniciales. Reutilizable desde Configuración.
+  function seedCatalog(d) {
+    KAM_CATEGORIAS.forEach((n, i) => {
+      d.categorias.push({ id: i + 1, nombre: n, descripcion: "", activo: true });
+    });
+    const catId = (nombre) => KAM_CATEGORIAS.indexOf(nombre) + 1;
+
+    KAM_PRODUCTOS.forEach((p, i) => {
+      const id = i + 1;
+      d.productos.push({
+        id,
+        sku: p.sku,
+        nombre: p.nombre,
+        categoria_id: catId(p.categoria),
+        unidad: "und",
+        precio_venta: p.precio,
+        costo_promedio: p.costo,
+        stock_minimo: p.min,
+        activo: true,
+        created_at: U.nowISO(),
+        created_by: 1
+      });
+      if (p.stock > 0) {
+        d.inventario_movimientos.push({
+          id: d.inventario_movimientos.length + 1,
+          fecha: U.nowISO(),
+          producto_id: id,
+          tipo: "entrada",
+          cantidad: p.stock,
+          costo_unitario: p.costo,
+          valor: p.stock * p.costo,
+          saldo_cantidad: p.stock,
+          saldo_valor: p.stock * p.costo,
+          costo_promedio: p.costo,
+          referencia_tipo: "apertura",
+          referencia_id: 0,
+          motivo: "Carga inicial de inventario",
+          usuario_id: 1
+        });
+      }
+    });
+  }
+
+  // Carga sólo el catálogo (sin tocar usuarios/ventas/compras/caja).
+  function loadKamCatalog() {
+    const d = getDB();
+    d.productos = [];
+    d.categorias = [];
+    d.inventario_movimientos = [];
+    d.ajustes_inventario = [];
+    seedCatalog(d);
+    d._seq = d._seq || {};
+    d._seq.categorias = KAM_CATEGORIAS.length;
+    d._seq.productos = KAM_PRODUCTOS.length;
+    d._seq.inventario_movimientos = KAM_PRODUCTOS.length;
+    d._seq.ajustes_inventario = 0;
+    setDB(d);
   }
 
   async function init() {
@@ -244,7 +361,7 @@ const DB = (() => {
       saldoValor = saldoQty * cp;
       costoPromedio = cp;
     } else { // ajuste
-      saldoQty = qty; // ajuste a cantidad final
+      saldoQty = qty;
       const cp = prev ? U.num(prev.costo_promedio) : cu || avgCostOf(producto_id);
       saldoValor = saldoQty * cp;
       costoPromedio = cp;
@@ -266,7 +383,6 @@ const DB = (() => {
       usuario_id: Auth.currentUser()?.id || 0
     };
     d.inventario_movimientos.push(mov);
-    // refrescar costo_promedio en producto
     const pi = d.productos.findIndex(p => p.id === producto_id);
     if (pi >= 0) d.productos[pi].costo_promedio = costoPromedio;
     setDB(d);
@@ -278,12 +394,12 @@ const DB = (() => {
     return list("caja_sesiones", { caja_id: cajaId, estado: "abierta" }).slice(-1)[0] || null;
   }
 
-  function pushCajaMov({ caja_id, fecha, tipo, concepto, referencia_tipo, referencia_id, metodo_pago_id, monto }) {
+  function pushCajaMov({ caja_id, fecha, tipo, concepto, referencia_tipo, referencia_id, metodo_pago_id, monto, usuario_id }) {
     return insert("caja_movimientos", {
       caja_id, fecha: fecha || U.nowISO(), tipo, concepto,
       referencia_tipo: referencia_tipo || "", referencia_id: referencia_id || 0,
       metodo_pago_id: metodo_pago_id || 0, monto: U.num(monto),
-      usuario_id: Auth.currentUser()?.id || 0
+      usuario_id: usuario_id || Auth.currentUser()?.id || 0
     });
   }
 
@@ -294,8 +410,7 @@ const DB = (() => {
     rows.forEach(r => {
       if (["apertura","ingreso","ajuste"].includes(r.tipo) && U.num(r.monto) > 0) saldo += U.num(r.monto);
       else if (r.tipo === "egreso") saldo -= U.num(r.monto);
-      else if (r.tipo === "cierre") {/* informativo */}
-      else if (r.tipo === "ajuste") saldo += U.num(r.monto); // monto puede ser negativo
+      else if (r.tipo === "ajuste") saldo += U.num(r.monto);
     });
     return saldo;
   }
@@ -313,7 +428,6 @@ const DB = (() => {
     return data.data;
   }
 
-  // Restablecer demo
   async function resetDemo() {
     localStorage.removeItem(KEY);
     localStorage.removeItem(APP_CONFIG.sessionKey);
@@ -325,7 +439,8 @@ const DB = (() => {
     list, get, insert, update, voidRow, audit,
     stockOf, avgCostOf, lastInvMovement, pushInvMovement,
     activeCajaSession, pushCajaMov, cajaBalance,
-    remote, resetDemo, TABLES
+    remote, resetDemo, loadKamCatalog, seedCatalog,
+    KAM_PRODUCTOS, KAM_CATEGORIAS, TABLES
   };
 })();
 

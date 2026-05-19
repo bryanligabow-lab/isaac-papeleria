@@ -22,7 +22,7 @@ const U = {
 
   money(n) {
     n = Number(n) || 0;
-    return APP_CONFIG.currency + n.toLocaleString("es-CO", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    return APP_CONFIG.currency + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   },
 
   num(n) { return Number(n) || 0; },

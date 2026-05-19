@@ -6,7 +6,10 @@ window.APP_CONFIG = {
   mode: "demo", // "demo" | "production"
   appName: "KAM Papelería",
   currency: "$",
-  ivaDefault: 0.19,
+  currencyCode: "USD",
+  locale: "es-EC",
+  country: "Ecuador",
+  ivaDefault: 0.15,
   storageKey: "isaac_papeleria_db_v1",
   sessionKey: "isaac_papeleria_session_v1"
 };

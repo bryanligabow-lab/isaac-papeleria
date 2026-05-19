@@ -9,7 +9,8 @@ Router.register("/config", async (host) => {
         <div class="page-header">
           <h2>Configuración del sistema</h2>
           <div class="actions">
-            <button class="btn btn-warning" id="btn-reset">Reiniciar datos demo</button>
+            <button class="btn btn-primary" id="btn-load-catalog">📦 Cargar catálogo KAM (62 productos)</button>
+            <button class="btn btn-warning" id="btn-reset">Reiniciar todo</button>
             <button class="btn" id="btn-export-db">⬇ Backup JSON</button>
             <button class="btn" id="btn-import-db">⬆ Restaurar JSON</button>
           </div>
@@ -53,10 +54,24 @@ Router.register("/config", async (host) => {
     });
 
     host.querySelector("#btn-reset").addEventListener("click", async () => {
-      if (await U.confirm("Reiniciar", "Esto borrará TODOS los datos locales y restaurará los datos demo. ¿Continuar?")) {
+      if (await U.confirm("Reiniciar", "Esto borrará TODOS los datos locales (usuarios, ventas, compras, etc) y volverá a sembrar el sistema desde cero. ¿Continuar?")) {
         await DB.resetDemo();
         location.reload();
       }
+    });
+
+    host.querySelector("#btn-load-catalog").addEventListener("click", async () => {
+      if (!await U.confirm("Cargar catálogo KAM",
+        "Esto eliminará los productos actuales, sus categorías y movimientos de inventario, y cargará el catálogo completo de KAM Papelería (62 productos con stock inicial). NO afecta ventas, compras, caja, ni usuarios. ¿Continuar?"
+      )) return;
+
+      const db = DB.getDB();
+      const hayMovs = (db.ventas?.length || 0) + (db.compras?.length || 0) > 0;
+      if (hayMovs && !await U.confirm("Atención", "Detectamos ventas o compras existentes. Si las cargaste con los productos antiguos quedarán referenciando productos inexistentes. Te recomiendo usar 'Reiniciar todo'. ¿Aún así quieres cargar el catálogo?")) return;
+
+      DB.loadKamCatalog();
+      U.toast(`Catálogo KAM cargado (${DB.KAM_PRODUCTOS.length} productos)`, "success");
+      setTimeout(() => location.reload(), 600);
     });
 
     host.querySelector("#btn-export-db").addEventListener("click", () => {
