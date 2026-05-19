@@ -123,6 +123,29 @@ function nextId_(name) {
 }
 
 // ============= Init =============
+
+/**
+ * RECOMENDADO: crea una hoja nueva en TU cuenta (la misma que corre Apps Script),
+ * la registra como SPREADSHEET_ID y la inicializa con todas las pestañas.
+ * Ejecuta esta función UNA SOLA VEZ desde el editor.
+ */
+function createNewDatabase() {
+  const ss = SpreadsheetApp.create("KAM Papelería - Base de datos");
+  const id = ss.getId();
+  const url = ss.getUrl();
+  PropertiesService.getScriptProperties().setProperty("SPREADSHEET_ID", id);
+  // Borrar la hoja por defecto "Hoja 1" después de crear las nuestras
+  initDatabase();
+  try {
+    const def = ss.getSheetByName("Hoja 1") || ss.getSheetByName("Sheet1");
+    if (def && ss.getSheets().length > 1) ss.deleteSheet(def);
+  } catch (e) {}
+  Logger.log("✅ Hoja creada: " + url);
+  Logger.log("✅ SPREADSHEET_ID configurado: " + id);
+  Logger.log("👉 Abre esta URL: " + url);
+  return url;
+}
+
 function initDatabase() {
   const ss = ss_();
   TABLES.forEach(name => {
