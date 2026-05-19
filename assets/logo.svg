@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 220" width="420" height="220">
+  <defs>
+    <style>
+      .ink { fill: #1a1a1a; }
+      .accent { fill: #C9A77E; }
+      .small { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 18px; letter-spacing: 6px; font-weight: 300; }
+    </style>
+  </defs>
+
+  <!-- K -->
+  <g class="ink">
+    <rect x="70" y="60" width="14" height="100"/>
+    <polygon points="84,108 140,60 156,60 100,110"/>
+    <polygon points="100,110 156,160 140,160 84,112"/>
+  </g>
+
+  <!-- A: dos diagonales y barra central beige -->
+  <g>
+    <polygon class="ink" points="170,160 200,60 210,60 184,160"/>
+    <polygon class="accent" points="210,60 220,60 244,160 230,160"/>
+    <rect class="accent" x="190" y="120" width="42" height="10"/>
+  </g>
+
+  <!-- M -->
+  <g class="ink">
+    <rect x="252" y="60" width="14" height="100"/>
+    <polygon points="266,60 282,60 304,118 300,130"/>
+    <polygon points="304,118 308,118 330,60 346,60 314,130"/>
+    <rect x="332" y="60" width="14" height="100"/>
+  </g>
+
+  <!-- Texto inferior con bullets beige -->
+  <g>
+    <circle class="accent" cx="135" cy="190" r="3.5"/>
+    <text x="210" y="196" text-anchor="middle" class="small ink">PAPELERÍA</text>
+    <circle class="accent" cx="290" cy="190" r="3.5"/>
+  </g>
+</svg>

@@ -4,11 +4,10 @@ Router.register("/login", async (host) => {
   host.innerHTML = `
     <div class="login-wrap">
       <form class="login-card" id="login-form">
-        <div style="text-align:center;margin-bottom:20px">
-          <div style="width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,#2563eb,#7c3aed);color:#fff;display:inline-grid;place-items:center;font-weight:800;font-size:20px">IP</div>
+        <div style="text-align:center;margin-bottom:8px">
+          <img src="assets/logo.svg" alt="KAM Papelería" style="max-width:200px;height:auto">
         </div>
-        <h1>${U.escape(APP_CONFIG.appName)}</h1>
-        <p class="sub">Inicia sesión para continuar</p>
+        <p class="sub" style="text-align:center;margin-top:0">Sistema administrativo · Inicia sesión</p>
         <label class="lbl">Usuario
           <input class="inp" name="username" value="admin" autocomplete="username" required>
         </label>

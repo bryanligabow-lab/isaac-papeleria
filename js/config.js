@@ -4,7 +4,7 @@
 window.APP_CONFIG = {
   apiUrl: "", // ej: "https://script.google.com/macros/s/AKfyc.../exec"
   mode: "demo", // "demo" | "production"
-  appName: "Isaac Papelería",
+  appName: "KAM Papelería",
   currency: "$",
   ivaDefault: 0.19,
   storageKey: "isaac_papeleria_db_v1",

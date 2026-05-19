@@ -65,7 +65,10 @@ Router.register("/dashboard", async (host) => {
     <div class="page">
       <div class="page-header">
         <h2>Resumen</h2>
-        <div class="muted">Hoy: ${new Date().toLocaleDateString("es-CO", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</div>
+        <div class="actions">
+          <a href="#/pos" class="btn" style="background:var(--accent);color:#1a1a1a;font-weight:700">💳 Punto de venta <kbd class="hint" style="background:rgba(0,0,0,.15);color:#1a1a1a">F12</kbd></a>
+          <span class="muted" style="font-size:12px;align-self:center">Hoy: ${new Date().toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long" })}</span>
+        </div>
       </div>
       <div class="kpi-grid">
         <div class="kpi"><div class="label">Ventas hoy</div><div class="value">${U.money(totalVentasHoy)}</div><div class="delta muted">${ventasHoy.length} transacciones</div></div>

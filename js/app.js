@@ -11,6 +11,22 @@
     location.hash = "#/dashboard";
   }
   Router.render();
+
+  // ===== Atajos globales =====
+  document.addEventListener("keydown", e => {
+    if (!Auth.isLoggedIn()) return;
+    // Evitar interferir con typing en inputs (excepto teclas de función F-keys)
+    const inField = /input|select|textarea/i.test(document.activeElement?.tagName || "");
+    // F12 → punto de venta (si no estamos ya, ir al POS; si estamos, lo maneja el módulo)
+    if (e.key === "F12" && !location.hash.startsWith("#/pos")) {
+      e.preventDefault();
+      location.hash = "#/pos";
+    }
+    // F8 → caja
+    else if (e.key === "F8" && !inField) { e.preventDefault(); location.hash = "#/caja"; }
+    // F10 → dashboard
+    else if (e.key === "F10" && !inField) { e.preventDefault(); location.hash = "#/dashboard"; }
+  });
 })();
 
 function renderShell() {
@@ -27,7 +43,8 @@ function renderShell() {
       { path: "/dashboard", label: "Dashboard", ico: "🏠", mod: "dashboard" }
     ]},
     { sec: "Operaciones", items: [
-      { path: "/ventas", label: "Ventas", ico: "🛒", mod: "ventas" },
+      { path: "/pos", label: "Punto de venta", ico: "💳", mod: "ventas" },
+      { path: "/ventas", label: "Ventas (historial)", ico: "🛒", mod: "ventas" },
       { path: "/compras", label: "Compras", ico: "📦", mod: "compras" },
       { path: "/caja", label: "Caja", ico: "💵", mod: "caja" },
       { path: "/egresos", label: "Egresos", ico: "📤", mod: "egresos" }
@@ -66,8 +83,8 @@ function renderShell() {
     <div class="shell">
       <aside class="sidebar" id="sidebar">
         <div class="brand">
-          <div class="logo">IP</div>
-          <div class="name">${U.escape(APP_CONFIG.appName)}<small>v1.0</small></div>
+          <img src="assets/logo-mark.svg" alt="KAM" class="logo-img">
+          <div class="name">${U.escape(APP_CONFIG.appName)}<small>Sistema administrativo</small></div>
         </div>
         <nav>${navHtml}</nav>
         <div style="padding:16px;margin-top:8px">
