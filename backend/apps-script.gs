@@ -9,8 +9,10 @@
  *   - SPREADSHEET_ID   : ID del Google Sheet
  *   - TELEGRAM_TOKEN   : 8980738836:AAGQfL9n7jzPDWJtALIpD4XCq0vrpzbxcp4
  *   - DRIVE_FOLDER_ID  : (opcional) id carpeta para guardar imágenes de facturas
- *   - OCR_PROVIDER     : "vision" | "drive" | "none"
- *   - VISION_API_KEY   : (si OCR_PROVIDER=vision) clave de Google Cloud Vision
+ *   - OCR_PROVIDER     : "gemini" (recomendado) | "vision" | "drive" | "none"
+ *   - GEMINI_API_KEY   : clave de Google AI Studio (https://aistudio.google.com/app/apikey)
+ *   - GEMINI_MODEL     : (opcional) por defecto "gemini-2.0-flash"
+ *   - VISION_API_KEY   : (legacy) clave de Google Cloud Vision si OCR_PROVIDER=vision
  */
 
 // ============= Tablas =============
@@ -538,6 +540,15 @@ function handleTelegram_(update) {
       return ok_();
     }
 
+    // Fallback inteligente: usar Gemini para entender la pregunta
+    if (geminiKey_()) {
+      const respuesta = smartQuery_(text, user);
+      if (respuesta) {
+        tg_("sendMessage", { chat_id, text: respuesta, parse_mode: "Markdown" });
+        return ok_();
+      }
+    }
+
     tg_("sendMessage", { chat_id, text: "No entendí. Escribe /ayuda para ver los comandos." });
     return ok_();
   } catch (e) {
@@ -585,6 +596,49 @@ function helpCmd_(chat_id) {
 }
 
 function fmtMoney_(n) { return "$" + (Number(n) || 0).toLocaleString("es-CO"); }
+
+// Pregunta natural → Gemini con contexto del negocio
+function smartQuery_(text, user) {
+  try {
+    const hoy = new Date().toISOString().slice(0, 10);
+    const productos = readAll_("productos").filter(p => p.activo);
+    const ventas = readAll_("ventas").filter(v => v.estado !== "anulada");
+    const compras = readAll_("compras").filter(c => c.estado !== "anulada");
+    const ventasHoy = ventas.filter(v => (v.fecha || "").slice(0, 10) === hoy);
+    const cajaMov = readAll_("caja_movimientos");
+    const saldoCaja = cajaMov.reduce((s, m) => s + (m.tipo === "ingreso" ? Number(m.monto) : -Number(m.monto)), 0);
+
+    // Top productos por stock
+    const stockMap = {};
+    readAll_("inventario_movimientos").forEach(m => {
+      stockMap[m.producto_id] = Number(m.saldo_cantidad) || 0;
+    });
+    const bajoStock = productos.filter(p => (stockMap[p.id] || 0) <= Number(p.stock_minimo || 0));
+
+    const ctx = {
+      fecha_hoy: hoy,
+      productos_total: productos.length,
+      productos_bajo_stock: bajoStock.length,
+      ventas_hoy_total: ventasHoy.reduce((s, v) => s + Number(v.total || 0), 0),
+      ventas_hoy_count: ventasHoy.length,
+      ventas_mes_count: ventas.filter(v => (v.fecha || "").slice(0, 7) === hoy.slice(0, 7)).length,
+      compras_total: compras.length,
+      saldo_caja: saldoCaja,
+      muestra_productos: productos.slice(0, 30).map(p => ({
+        nombre: p.nombre, sku: p.sku, precio: Number(p.precio_venta),
+        costo: Number(p.costo_promedio), stock: stockMap[p.id] || 0
+      }))
+    };
+    const system =
+      "Eres el asistente del sistema KAM Papelería. " +
+      "Responde de forma BREVE y útil (máximo 4 líneas) en español, usando Markdown ligero. " +
+      "Usa los datos JSON del contexto; nunca inventes números. Si no hay datos suficientes, dilo. " +
+      "Formatea el dinero como $1.234. Usuario actual: " + (user?.nombre || user?.username || "anónimo") + ".";
+    const prompt = "Contexto JSON:\n" + JSON.stringify(ctx) + "\n\nPregunta del usuario: " + text;
+    const ans = geminiText_(prompt, system);
+    return ans || "";
+  } catch (e) { return ""; }
+}
 
 function stockCmd_(chat_id, text) {
   const q = text.replace(/^\/stock\s*/i, "").toLowerCase();
@@ -788,12 +842,105 @@ function confirmFactura_(chat_id, facturaId, user) {
 
 // ============= OCR =============
 function doOCR_(imageUrl, driveId) {
-  const provider = PropertiesService.getScriptProperties().getProperty("OCR_PROVIDER") || "drive";
+  const provider = PropertiesService.getScriptProperties().getProperty("OCR_PROVIDER") || "gemini";
   try {
+    if (provider === "gemini") return ocrGemini_(imageUrl);
     if (provider === "vision") return ocrVision_(imageUrl);
     if (provider === "drive") return ocrDrive_(imageUrl, driveId);
   } catch (e) { /* fallback */ }
   return "";
+}
+
+// ============= Gemini API =============
+function geminiKey_() {
+  return PropertiesService.getScriptProperties().getProperty("GEMINI_API_KEY") || "";
+}
+function geminiModel_() {
+  return PropertiesService.getScriptProperties().getProperty("GEMINI_MODEL") || "gemini-2.0-flash";
+}
+
+// Texto puro (consultas de Telegram en lenguaje natural)
+function geminiText_(prompt, systemPrompt) {
+  const key = geminiKey_(); if (!key) return "";
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel_() + ":generateContent?key=" + key;
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.2, maxOutputTokens: 800 }
+  };
+  if (systemPrompt) body.systemInstruction = { parts: [{ text: systemPrompt }] };
+  const res = UrlFetchApp.fetch(url, {
+    method: "post", contentType: "application/json",
+    payload: JSON.stringify(body), muteHttpExceptions: true
+  });
+  try {
+    const data = JSON.parse(res.getContentText());
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  } catch (e) { return ""; }
+}
+
+// Imagen → JSON estructurado de factura
+function geminiVisionInvoice_(imageUrl) {
+  const key = geminiKey_(); if (!key || !imageUrl) return null;
+  // descarga la imagen
+  const blob = UrlFetchApp.fetch(imageUrl).getBlob();
+  const b64 = Utilities.base64Encode(blob.getBytes());
+  const mime = blob.getContentType() || "image/jpeg";
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel_() + ":generateContent?key=" + key;
+  const systemPrompt =
+    "Eres un asistente que extrae datos de facturas de papelería. " +
+    "Devuelve SOLO JSON válido (sin markdown, sin ```), con esta estructura:\n" +
+    "{\n" +
+    '  "proveedor": "string",\n' +
+    '  "proveedor_doc": "string (NIT/RUC/RFC)",\n' +
+    '  "numero": "string (número de factura)",\n' +
+    '  "fecha": "YYYY-MM-DD",\n' +
+    '  "subtotal": number,\n' +
+    '  "iva": number,\n' +
+    '  "total": number,\n' +
+    '  "lineas": [ { "cantidad": number, "descripcion": "string", "costo": number, "subtotal": number } ]\n' +
+    "}\n" +
+    "Si un campo no aparece en la imagen, omítelo. Los números van sin símbolos ni separadores de miles.";
+  const body = {
+    contents: [{
+      parts: [
+        { text: "Extrae los datos de esta factura." },
+        { inlineData: { mimeType: mime, data: b64 } }
+      ]
+    }],
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    generationConfig: { temperature: 0, responseMimeType: "application/json", maxOutputTokens: 2000 }
+  };
+  const res = UrlFetchApp.fetch(url, {
+    method: "post", contentType: "application/json",
+    payload: JSON.stringify(body), muteHttpExceptions: true
+  });
+  try {
+    const data = JSON.parse(res.getContentText());
+    const txt = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    // limpiar posibles fences ```json ... ```
+    const clean = txt.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+    return JSON.parse(clean);
+  } catch (e) { return null; }
+}
+
+// OCR usando Gemini — devuelve texto plano para compat con parseInvoiceText_
+function ocrGemini_(imageUrl) {
+  const data = geminiVisionInvoice_(imageUrl);
+  if (!data) return "";
+  // serializar a "texto" para que parseInvoiceText_ funcione también si quieren
+  // pero el receiveInvoice_ usará el JSON directamente vía parseInvoiceGemini_
+  const lines = [];
+  if (data.proveedor) lines.push("Proveedor: " + data.proveedor);
+  if (data.proveedor_doc) lines.push("NIT: " + data.proveedor_doc);
+  if (data.numero) lines.push("Factura: " + data.numero);
+  if (data.fecha) lines.push("Fecha: " + data.fecha);
+  if (data.subtotal) lines.push("Subtotal: " + data.subtotal);
+  if (data.iva) lines.push("IVA: " + data.iva);
+  if (data.total) lines.push("Total: " + data.total);
+  (data.lineas || []).forEach(l => lines.push(`${l.cantidad} ${l.descripcion} ${l.costo} ${l.subtotal}`));
+  // dejamos el JSON crudo al final entre marcadores para que parseInvoiceText_ lo reconozca
+  lines.push("__GEMINI_JSON__" + JSON.stringify(data) + "__END__");
+  return lines.join("\n");
 }
 
 function ocrVision_(imageUrl) {
@@ -827,9 +974,31 @@ function ocrDrive_(imageUrl, driveId) {
   return text;
 }
 
-// Parser heurístico — espejo del cliente
+// Parser heurístico — espejo del cliente.
+// Si el texto contiene un marcador __GEMINI_JSON__ usa esos datos estructurados.
 function parseInvoiceText_(text) {
   if (!text) return {};
+  const gm = text.match(/__GEMINI_JSON__([\s\S]+?)__END__/);
+  if (gm) {
+    try {
+      const j = JSON.parse(gm[1]);
+      return {
+        proveedor: j.proveedor || "",
+        proveedor_doc: j.proveedor_doc || "",
+        numero: j.numero || "",
+        fecha: j.fecha || "",
+        subtotal: Number(j.subtotal) || 0,
+        iva: Number(j.iva) || 0,
+        total: Number(j.total) || 0,
+        lineas: (j.lineas || []).map(l => ({
+          cantidad: Number(l.cantidad) || 1,
+          descripcion: String(l.descripcion || ""),
+          costo: Number(l.costo) || 0,
+          subtotal: Number(l.subtotal) || (Number(l.cantidad) * Number(l.costo)) || 0
+        }))
+      };
+    } catch (e) { /* cae al parser heurístico */ }
+  }
   const out = { lineas: [] };
   let m = text.match(/proveedor\s*:?\s*(.+)/i); if (m) out.proveedor = m[1].split("\n")[0].trim();
   m = text.match(/(NIT|RUC|CC|RFC|Tax ID)[:\s]+([\d\.\-]+)/i); if (m) out.proveedor_doc = m[2];
