@@ -457,11 +457,11 @@ const DB = (() => {
     window.dispatchEvent(new CustomEvent("kam:sync-status", { detail: { ...STATUS } }));
   }
 
-  // Push fire-and-forget. Si falla, se guarda en cola para reintento.
+  // Push fire-and-forget. Si falla, se guarda en cola para reintento robusto.
   function pushAsync(action, payload) {
     if (!isOnline()) return;
     const q = loadQueue();
-    q.push({ action, payload, ts: Date.now() });
+    q.push({ action, payload, ts: Date.now(), attempts: 0, nextRetry: 0 });
     saveQueue(q);
     drainQueue();
   }
@@ -472,23 +472,36 @@ const DB = (() => {
     _draining = true;
     try {
       let q = loadQueue();
-      while (q.length) {
-        const job = q[0];
+      let consecFails = 0;
+      let i = 0;
+      while (i < q.length) {
+        const job = q[i];
+        // Saltar jobs cuyo nextRetry no ha llegado
+        if (job.nextRetry && job.nextRetry > Date.now()) { i++; continue; }
         try {
           await remote(job.action, job.payload);
-          q.shift();
+          q.splice(i, 1); // exito: quitar de la cola
           saveQueue(q);
+          consecFails = 0;
         } catch (e) {
-          console.warn("Sync push error:", e.message);
-          // Reintentar más tarde
-          if (Date.now() - job.ts > 60000 && q.length > 1) {
-            // job antiguo bloqueando: lo mandamos al final
-            q.push(q.shift());
-            saveQueue(q);
+          job.attempts = (job.attempts || 0) + 1;
+          job.lastError = e.message;
+          if (job.attempts >= 8) {
+            console.warn("Sync push DROPPED after", job.attempts, "attempts:", job.action, job.payload, e.message);
+            q.splice(i, 1); // descartar tras 8 intentos
           } else {
-            break;
+            // backoff exponencial: 2s, 4s, 8s, 16s, 32s, 60s (cap)
+            const wait = Math.min(2000 * Math.pow(2, job.attempts - 1), 60000);
+            job.nextRetry = Date.now() + wait;
+            i++; // saltar este y seguir con el siguiente
           }
+          saveQueue(q);
+          consecFails++;
+          // Pausa entre fallos para no machacar el servidor
+          await _sleep(Math.min(200 * consecFails, 2000));
+          if (consecFails >= 5) break; // demasiados errores seguidos: reintentar en proxima ronda
         }
+        await _sleep(80); // pequeña pausa entre escrituras (evita rate limit)
       }
       STATUS.lastSync = Date.now();
       broadcastStatus();
@@ -497,10 +510,14 @@ const DB = (() => {
     }
   }
 
-  // Reintenta periódicamente
+  // Reintenta periódicamente — más agresivo cuando hay cola pendiente
   if (typeof window !== "undefined") {
-    setInterval(() => { if (loadQueue().length) drainQueue(); }, 15000);
+    setInterval(() => {
+      const q = loadQueue();
+      if (q.length) drainQueue();
+    }, 5000); // cada 5s en vez de 15s
     window.addEventListener("online", drainQueue);
+    window.addEventListener("focus", drainQueue);
   }
 
   // === Sync masivo (botones manuales) ===

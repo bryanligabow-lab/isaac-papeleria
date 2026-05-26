@@ -87,6 +87,34 @@ function appendRow_(name, row) {
   sh.appendRow(head.map(h => row[h] === undefined ? "" : row[h]));
   return row;
 }
+
+// Append idempotente: si row.id ya existe, actualiza en lugar de duplicar.
+// Esto hace que los reintentos de la cola NO creen filas duplicadas en Sheets.
+function upsertRow_(name, row) {
+  const sh = sheet_(name);
+  const head = HEADERS[name] || sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+  if (!head.includes("id")) {
+    sh.appendRow(head.map(h => row[h] === undefined ? "" : row[h]));
+    return row;
+  }
+  if (row.id) {
+    // Buscar si ya existe esa id
+    const data = sh.getDataRange().getValues();
+    const idIdx = head.indexOf("id");
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][idIdx]) === String(row.id)) {
+        // Existe: hacer update
+        head.forEach((h, j) => { if (row[h] !== undefined) data[i][j] = row[h]; });
+        sh.getRange(i + 1, 1, 1, data[i].length).setValues([data[i]]);
+        const o = {}; head.forEach((h, j) => o[h] = data[i][j]); return o;
+      }
+    }
+  } else {
+    row.id = nextId_(name);
+  }
+  sh.appendRow(head.map(h => row[h] === undefined ? "" : row[h]));
+  return row;
+}
 function updateRow_(name, id, patch) {
   const sh = sheet_(name);
   const v = sh.getDataRange().getValues();
@@ -172,6 +200,43 @@ function resetSheets() {
   return "OK";
 }
 
+/**
+ * Limpia filas duplicadas por id en TODAS las tablas. Mantiene la primera ocurrencia.
+ * Útil después de bugs de sync que generaron duplicados (ej: ventas_detalle).
+ * EJECUTA esta función UNA VEZ desde el editor de Apps Script.
+ */
+function dedupeAllTables() {
+  const ss = ss_();
+  const report = [];
+  TABLES.forEach(name => {
+    const sh = ss.getSheetByName(name);
+    if (!sh || sh.getLastRow() < 2) return;
+    const head = HEADERS[name] || sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+    const idIdx = head.indexOf("id");
+    if (idIdx < 0) return; // tablas sin id no se deduplican
+    const data = sh.getDataRange().getValues();
+    const seen = new Set();
+    const keep = [data[0]]; // encabezado
+    let removed = 0;
+    for (let i = 1; i < data.length; i++) {
+      const id = String(data[i][idIdx]);
+      if (!id || seen.has(id)) { removed++; continue; }
+      seen.add(id);
+      keep.push(data[i]);
+    }
+    if (removed > 0) {
+      sh.clearContents();
+      sh.getRange(1, 1, keep.length, head.length).setValues(keep);
+      sh.getRange(1,1,1,head.length).setFontWeight("bold").setBackground("#e0e7ff");
+      sh.setFrozenRows(1);
+      report.push(name + ": -" + removed + " duplicados");
+    }
+  });
+  const msg = report.length ? report.join("\n") : "Sin duplicados";
+  Logger.log(msg);
+  return msg;
+}
+
 function initDatabase() {
   const ss = ss_();
   TABLES.forEach(name => {
@@ -231,7 +296,7 @@ function doPost(e) {
       case "login": return ok_(login_(body));
       case "list": return ok_(readAll_(body.table));
       case "get": return ok_((readAll_(body.table) || []).find(function(r) { return String(r.id) === String(body.id); }));
-      case "create": return ok_(appendRow_(body.table, body.row));
+      case "create": return ok_(upsertRow_(body.table, body.row));
       case "update": return ok_(updateRow_(body.table, body.id, body.patch));
       case "void": return ok_(voidRow_(body.table, body.id, body.motivo, body.userId));
       case "createSale": return ok_(createSale_(body));
