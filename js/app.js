@@ -54,6 +54,15 @@ window.startPeriodicSync = startPeriodicSync;
 let _syncing = false;
 async function refreshFromServer() {
   if (_syncing || !DB.isOnline() || !Auth.isLoggedIn()) return;
+  // CRÍTICO: si hay cola de push pendiente, NO bajar datos del servidor —
+  // sobrescribiríamos cambios locales que aún no han subido (ej: detalles de venta recién hecha).
+  try {
+    const q = JSON.parse(localStorage.getItem("kam_sync_queue_v1") || "[]");
+    if (q.length > 0) {
+      console.log("Refresh diferido: hay", q.length, "cambios locales pendientes de subir");
+      return;
+    }
+  } catch (e) {}
   _syncing = true;
   try {
     await DB.syncDownAll();

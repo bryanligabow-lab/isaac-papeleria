@@ -594,11 +594,37 @@ const DB = (() => {
   async function syncDownAll(onProgress) {
     if (!isOnline()) throw new Error("Modo demo, configura la URL primero");
     const db = getDB();
+    // IDs de filas pendientes en la cola — NUNCA las pisamos
+    let pendingByTable = {};
+    try {
+      const q = loadQueue();
+      q.forEach(j => {
+        if (j.payload?.table && j.payload?.row?.id != null) {
+          const t = j.payload.table;
+          pendingByTable[t] = pendingByTable[t] || new Set();
+          pendingByTable[t].add(String(j.payload.row.id));
+        }
+      });
+    } catch (e) {}
+
     let done = 0, errors = 0;
     for (const table of TABLES) {
       try {
         const rows = await listRemote(table);
-        db[table] = Array.isArray(rows) ? rows : [];
+        const serverRows = Array.isArray(rows) ? rows : [];
+        // Merge: si una fila local está pendiente de subir, NO la pisamos con la del server
+        const pending = pendingByTable[table];
+        if (pending && pending.size > 0) {
+          const local = db[table] || [];
+          const localPending = local.filter(r => pending.has(String(r.id)));
+          const serverIds = new Set(serverRows.map(r => String(r.id)));
+          // empezar con el server, después meter las locales pendientes que no estén en server
+          const merged = serverRows.slice();
+          localPending.forEach(r => { if (!serverIds.has(String(r.id))) merged.push(r); });
+          db[table] = merged;
+        } else {
+          db[table] = serverRows;
+        }
       } catch (e) {
         console.warn("syncDown " + table + ":", e.message);
         errors++;
