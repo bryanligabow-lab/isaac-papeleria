@@ -218,7 +218,9 @@ function renderShell() {
     btn.style.opacity = "0.5";
     btn.textContent = "⏳";
     try {
-      await window.refreshFromServer();
+      // Refresh manual: FORZADO, sin importar la cola (queremos los datos del server YA)
+      await DB.syncDownAll();
+      if (window.Router) Router.render();
       U.toast("Datos actualizados desde el servidor", "success", 1500);
     } catch (err) {
       U.toast("Error al actualizar: " + err.message, "danger");

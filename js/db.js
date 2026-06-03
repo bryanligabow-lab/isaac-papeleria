@@ -605,10 +605,10 @@ const DB = (() => {
   }
 
   // GET list — más confiable que POST (sin problemas de redirect/CORS)
-  async function listRemote(table) {
+  async function listRemoteOnce(table, timeoutMs) {
     const url = APP_CONFIG.apiUrl + "?action=list&table=" + encodeURIComponent(table);
     const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), 20000);
+    const tid = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
       const res = await fetch(url, { method: "GET", signal: ctrl.signal });
       const text = await res.text();
@@ -618,6 +618,21 @@ const DB = (() => {
       if (!data.ok) throw new Error(data.error || "Error remoto");
       return data.data || [];
     } finally { clearTimeout(tid); }
+  }
+  // Reintentos automáticos con backoff — clave para tablas grandes/lentas (ventas)
+  async function listRemote(table) {
+    let lastErr;
+    const timeouts = [25000, 35000, 45000]; // 3 intentos con timeouts crecientes
+    for (let i = 0; i < timeouts.length; i++) {
+      try {
+        return await listRemoteOnce(table, timeouts[i]);
+      } catch (e) {
+        lastErr = e;
+        console.warn(`listRemote ${table} intento ${i+1} fallo: ${e.message}`);
+        if (i < timeouts.length - 1) await _sleep(1000 * (i + 1));
+      }
+    }
+    throw lastErr || new Error("listRemote falló tras reintentos");
   }
 
   async function syncDownAll(onProgress) {
