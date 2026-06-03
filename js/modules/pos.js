@@ -366,7 +366,7 @@ Router.register("/pos", async (host) => {
       document.addEventListener("keydown", onCobroKey);
       mdl.addEventListener("click", e => { if (e.target.dataset.close !== undefined || e.target === mdl) close(); });
 
-      mdl.querySelector("#frm-cobro").addEventListener("submit", e => {
+      mdl.querySelector("#frm-cobro").addEventListener("submit", async e => {
         e.preventDefault();
         const recibido = U.num(recInp.value);
         if (selectedTipo === "efectivo" && recibido < total) {
@@ -379,6 +379,48 @@ Router.register("/pos", async (host) => {
         }
         const cajaId = U.num(mdl.querySelector("#cobro-caja").value);
 
+        const observaciones = selectedTipo === "efectivo" ? `Recibido ${U.money(recibido)} · Cambio ${U.money(recibido - total)}` : "";
+
+        // ===== MODO ONLINE: crear venta atómicamente en el servidor =====
+        if (DB.isOnline()) {
+          const btn = e.target.querySelector('button[type="submit"]');
+          if (btn) { btn.disabled = true; btn.textContent = "Procesando…"; }
+          try {
+            const venta = await DB.remote("createSale", {
+              cliente_id: clienteId, vendedor_id: vendedorId,
+              metodo_pago_id: selectedMP.id, caja_id: cajaId,
+              descuento: desc, observaciones, pagada: true,
+              lineas: cart.map(it => ({
+                producto_id: it.producto_id,
+                cantidad: it.cantidad,
+                precio_unitario: it.precio
+              }))
+            });
+            // Insertar al cache local con los IDs reales del servidor
+            DB.cacheInsert("ventas", venta);
+            cart.forEach(it => {
+              DB.cacheInsert("ventas_detalle", {
+                venta_id: venta.id, producto_id: it.producto_id,
+                cantidad: it.cantidad, precio_unitario: it.precio, descuento: 0,
+                subtotal: it.precio * it.cantidad,
+                costo_unitario: it.costo, utilidad: it.cantidad * (it.precio - it.costo)
+              });
+            });
+            close();
+            cart.length = 0;
+            renderCart();
+            showReceipt(venta.id, recibido, selectedTipo === "efectivo");
+            U.toast(`Venta ${venta.numero} · ${U.money(total)}`, "success");
+            // Sincronizar abajo en background para tener detalles/movs con IDs del server
+            setTimeout(() => { DB.syncDownAll().catch(() => {}); }, 500);
+          } catch (err) {
+            if (btn) { btn.disabled = false; btn.textContent = "Confirmar"; }
+            U.toast("Error al registrar venta: " + (err.message || "intenta de nuevo"), "danger");
+          }
+          return;
+        }
+
+        // ===== MODO DEMO/OFFLINE: fallback local =====
         const venta = DB.insert("ventas", {
           numero: "V-" + Date.now().toString(36).toUpperCase(),
           cliente_id: clienteId, vendedor_id: vendedorId,
@@ -388,7 +430,7 @@ Router.register("/pos", async (host) => {
           costo_total: cart.reduce((a, b) => a + b.costo * b.cantidad, 0),
           utilidad: total - cart.reduce((a, b) => a + b.costo * b.cantidad, 0),
           estado: "pagada",
-          observaciones: selectedTipo === "efectivo" ? `Recibido ${U.money(recibido)} · Cambio ${U.money(recibido - total)}` : ""
+          observaciones
         });
         cart.forEach(it => {
           DB.insert("ventas_detalle", {

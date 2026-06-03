@@ -285,6 +285,17 @@ const DB = (() => {
     return row;
   }
 
+  // Insertar al cache local SIN encolar push (cuando ya viene del servidor)
+  function cacheInsert(table, row) {
+    const d = getDB();
+    d[table] = d[table] || [];
+    if (row.id != null && !d[table].find(r => String(r.id) === String(row.id))) {
+      d[table].push(row);
+      setDB(d);
+    }
+    return row;
+  }
+
   function update(table, id, patch) {
     const d = getDB();
     const i = (d[table] || []).findIndex(r => String(r.id) === String(id));
@@ -719,7 +730,7 @@ const DB = (() => {
 
   return {
     init, getDB, setDB, nextId,
-    list, get, insert, update, voidRow, audit,
+    list, get, insert, cacheInsert, update, voidRow, audit,
     stockOf, avgCostOf, lastInvMovement, pushInvMovement,
     activeCajaSession, pushCajaMov, cajaBalance,
     remote, resetDemo, loadKamCatalog, seedCatalog,
