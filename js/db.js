@@ -467,41 +467,59 @@ const DB = (() => {
   }
 
   let _draining = false;
+  let _jobSeq = 0;
   async function drainQueue() {
     if (_draining || !isOnline()) return;
     _draining = true;
     try {
-      let q = loadQueue();
       let consecFails = 0;
-      let i = 0;
-      while (i < q.length) {
-        const job = q[i];
-        // Saltar jobs cuyo nextRetry no ha llegado
-        if (job.nextRetry && job.nextRetry > Date.now()) { i++; continue; }
+      // Loop principal: en cada vuelta recargamos la cola desde localStorage
+      // (evita race condition con pushAsync que agrega items mientras awaiting fetch)
+      while (true) {
+        const q = loadQueue();
+        if (!q.length) break;
+        // Encontrar primer job listo para procesar (nextRetry pasado)
+        const now = Date.now();
+        const idx = q.findIndex(j => !j.nextRetry || j.nextRetry <= now);
+        if (idx < 0) break; // todos esperando backoff
+        const job = q[idx];
+        // Asignar uid si no lo tiene (para identificar después del await)
+        if (!job._uid) {
+          job._uid = (++_jobSeq) + "-" + Math.random().toString(36).slice(2);
+          q[idx] = job;
+          saveQueue(q);
+        }
+        const jobUid = job._uid;
         try {
           await remote(job.action, job.payload);
-          q.splice(i, 1); // exito: quitar de la cola
-          saveQueue(q);
+          // ÉXITO: recargar cola fresca, quitar SOLO este job por uid
+          const q2 = loadQueue();
+          const i2 = q2.findIndex(j => j._uid === jobUid);
+          if (i2 >= 0) { q2.splice(i2, 1); saveQueue(q2); }
           consecFails = 0;
         } catch (e) {
-          job.attempts = (job.attempts || 0) + 1;
-          job.lastError = e.message;
-          if (job.attempts >= 8) {
-            console.warn("Sync push DROPPED after", job.attempts, "attempts:", job.action, job.payload, e.message);
-            q.splice(i, 1); // descartar tras 8 intentos
-          } else {
-            // backoff exponencial: 2s, 4s, 8s, 16s, 32s, 60s (cap)
-            const wait = Math.min(2000 * Math.pow(2, job.attempts - 1), 60000);
-            job.nextRetry = Date.now() + wait;
-            i++; // saltar este y seguir con el siguiente
+          // FALLO: recargar cola fresca, actualizar SOLO este job por uid
+          const q2 = loadQueue();
+          const i2 = q2.findIndex(j => j._uid === jobUid);
+          if (i2 >= 0) {
+            const j = q2[i2];
+            j.attempts = (j.attempts || 0) + 1;
+            j.lastError = e.message;
+            if (j.attempts >= 8) {
+              console.warn("Sync push DROPPED tras", j.attempts, "intentos:", j.action, j.payload, e.message);
+              q2.splice(i2, 1);
+            } else {
+              const wait = Math.min(2000 * Math.pow(2, j.attempts - 1), 60000);
+              j.nextRetry = Date.now() + wait;
+              q2[i2] = j;
+            }
+            saveQueue(q2);
           }
-          saveQueue(q);
           consecFails++;
-          // Pausa entre fallos para no machacar el servidor
           await _sleep(Math.min(200 * consecFails, 2000));
-          if (consecFails >= 5) break; // demasiados errores seguidos: reintentar en proxima ronda
+          if (consecFails >= 5) break;
         }
-        await _sleep(80); // pequeña pausa entre escrituras (evita rate limit)
+        await _sleep(80);
       }
       STATUS.lastSync = Date.now();
       broadcastStatus();
